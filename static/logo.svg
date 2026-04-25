@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1a1510"/>
+      <stop offset="100%" stop-color="#0a0806"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#c8a45e" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#c8a45e" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft-glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="98" fill="url(#bg)" stroke="#c8a45e" stroke-width="1.5" stroke-opacity="0.6"/>
+
+  <!-- Glow aura -->
+  <circle cx="100" cy="100" r="70" fill="url(#glow)"/>
+
+  <!-- Neural circuit lines -->
+  <g stroke="#c8a45e" stroke-opacity="0.25" stroke-width="1" fill="none">
+    <line x1="100" y1="38" x2="100" y2="62"/>
+    <line x1="100" y1="138" x2="100" y2="162"/>
+    <line x1="38" y1="100" x2="62" y2="100"/>
+    <line x1="138" y1="100" x2="162" y2="100"/>
+    <line x1="55" y1="55" x2="72" y2="72"/>
+    <line x1="128" y1="72" x2="145" y2="55"/>
+    <line x1="55" y1="145" x2="72" y2="128"/>
+    <line x1="128" y1="128" x2="145" y2="145"/>
+  </g>
+
+  <!-- Outer node dots -->
+  <g fill="#c8a45e" fill-opacity="0.5">
+    <circle cx="100" cy="36" r="3"/>
+    <circle cx="100" cy="164" r="3"/>
+    <circle cx="36" cy="100" r="3"/>
+    <circle cx="164" cy="100" r="3"/>
+    <circle cx="53" cy="53" r="2.5"/>
+    <circle cx="147" cy="53" r="2.5"/>
+    <circle cx="53" cy="147" r="2.5"/>
+    <circle cx="147" cy="147" r="2.5"/>
+  </g>
+
+  <!-- Inner circuit ring -->
+  <circle cx="100" cy="100" r="52" fill="none" stroke="#c8a45e" stroke-width="0.75" stroke-opacity="0.4" stroke-dasharray="4 6"/>
+
+  <!-- Main brain / bud shape — stylised leaf cluster -->
+  <g filter="url(#soft-glow)">
+    <!-- Left lobe -->
+    <path d="M100 90 C85 75 65 75 65 92 C65 108 82 112 100 118" fill="#c8a45e" fill-opacity="0.15" stroke="#c8a45e" stroke-width="1.5" stroke-opacity="0.8"/>
+    <!-- Right lobe -->
+    <path d="M100 90 C115 75 135 75 135 92 C135 108 118 112 100 118" fill="#c8a45e" fill-opacity="0.15" stroke="#c8a45e" stroke-width="1.5" stroke-opacity="0.8"/>
+    <!-- Top bud -->
+    <path d="M92 90 C88 72 100 62 108 72 C112 80 108 90 100 90" fill="#c8a45e" fill-opacity="0.2" stroke="#c8a45e" stroke-width="1.5" stroke-opacity="0.9"/>
+    <!-- Stem -->
+    <line x1="100" y1="118" x2="100" y2="132" stroke="#c8a45e" stroke-width="2" stroke-opacity="0.7" stroke-linecap="round"/>
+    <!-- Leaf left -->
+    <path d="M100 126 C94 120 82 122 84 130 C86 136 96 132 100 126" fill="#c8a45e" fill-opacity="0.2" stroke="#c8a45e" stroke-width="1" stroke-opacity="0.6"/>
+  </g>
+
+  <!-- Centre pulse dot -->
+  <circle cx="100" cy="100" r="4" fill="#c8a45e"/>
+  <circle cx="100" cy="100" r="7" fill="none" stroke="#c8a45e" stroke-width="1" stroke-opacity="0.5"/>
+
+  <!-- Connection sparks on circuit lines -->
+  <g fill="#e4d8c4" fill-opacity="0.8">
+    <circle cx="100" cy="50" r="1.5"/>
+    <circle cx="150" cy="100" r="1.5"/>
+    <circle cx="100" cy="150" r="1.5"/>
+    <circle cx="50" cy="100" r="1.5"/>
+  </g>
+</svg>

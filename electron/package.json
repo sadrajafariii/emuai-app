@@ -1,0 +1,44 @@
+{
+  "name": "bud-app",
+  "version": "1.0.0",
+  "description": "bud — Personal AI Agent",
+  "main": "electron-main.js",
+  "scripts": {
+    "start":     "electron .",
+    "build-win": "electron-builder --win --x64",
+    "build-mac": "electron-builder --mac",
+    "build-linux":"electron-builder --linux"
+  },
+  "build": {
+    "appId":       "com.budapp.bud",
+    "productName": "bud",
+    "copyright":   "Copyright © 2025 bud",
+    "directories": { "output": "dist" },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "../static/logo.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "../static/logo.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "../static/logo.png"
+    },
+    "extraResources": [
+      { "from": "../", "to": "app",
+        "filter": ["**/*.py","requirements.txt",".env","static/**","workspace/**"] }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}

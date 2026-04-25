@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -c \"import fastapi, uvicorn, openai, aiosqlite, playwright, httpx, aiofiles; print\\(''All imports OK''\\)\")",
+      "Bash(python -c \"from main import app; print\\(''main.py OK''\\)\")",
+      "Bash(python -c \"from agent import run_agent; from tools import TOOL_MAP, TOOL_SCHEMAS; from llm_router import chat_completion; from db import init_db; print\\(''All modules OK, tools:'', list\\(TOOL_MAP.keys\\(\\)\\)\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(timeout 8 python main.py)",
+      "Bash(playwright install:*)",
+      "Bash(python -m playwright install chromium)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(python -c \"from tools import execute_tool, browse; print\\(''tools OK''\\)\")",
+      "Bash(timeout 6 python main.py)",
+      "Bash(timeout 5 python main.py)",
+      "Bash(python -c \"import main; print\\(''main imports OK''\\)\")",
+      "Bash(winget install:*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(findstr \":80[0-9][0-9]\")",
+      "Bash(tasklist /FI \"PID eq 69332\")",
+      "Bash(tasklist /FI \"PID eq 12892\")",
+      "Bash(tasklist)",
+      "Bash(findstr \"69332\\\\|12892\\\\|python\\\\|uvicorn\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(python -c \"import ast, sys:*)",
+      "Bash(flyctl deploy:*)",
+      "Bash(where fly:*)",
+      "Bash(where flyctl:*)",
+      "Read(//c/Users/User/Desktop/bud.app/$USERPROFILE/.fly/**)",
+      "Bash(\"$USERPROFILE/.fly/bin/flyctl\" deploy:*)",
+      "Bash(python -c \"import auth; import db; import agent; import llm_router; print\\(''All imports OK''\\)\")",
+      "Bash(python -c \"import main; print\\(''main.py OK''\\)\")"
+    ]
+  }
+}

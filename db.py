@@ -1,0 +1,584 @@
+import aiosqlite
+import json
+import uuid
+from datetime import datetime
+
+import settings_store
+
+DB_PATH = "emulaiator.db"
+
+
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Enable WAL mode for better concurrent write performance
+        await db.execute("PRAGMA journal_mode=WAL")
+
+        await db.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                name TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now')),
+                settings TEXT DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                title TEXT DEFAULT 'New Chat',
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT,
+                tool_calls TEXT,
+                tool_call_id TEXT,
+                name TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS facts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                fact TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS vault (
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                event_type TEXT NOT NULL,
+                tool_name TEXT,
+                model TEXT,
+                tokens INTEGER DEFAULT 0,
+                session_id TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS custom_tools (
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT,
+                command TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+        """)
+
+        # Safe migrations for pre-existing databases
+        for stmt in [
+            "ALTER TABLE sessions ADD COLUMN pinned INTEGER DEFAULT 0",
+            "ALTER TABLE sessions ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE sessions ADD COLUMN user_id TEXT",
+            "ALTER TABLE facts ADD COLUMN user_id TEXT",
+            "ALTER TABLE vault ADD COLUMN user_id TEXT",
+            "ALTER TABLE analytics ADD COLUMN user_id TEXT",
+            "ALTER TABLE custom_tools ADD COLUMN user_id TEXT",
+        ]:
+            try:
+                await db.execute(stmt)
+            except Exception:
+                pass
+        await db.commit()
+
+
+# ── Users ──────────────────────────────────────────────────────────────────────
+
+async def create_user(email: str, password_hash: str, name: str = "") -> dict:
+    uid = str(uuid.uuid4())
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)",
+            (uid, email.lower().strip(), password_hash, name),
+        )
+        await db.commit()
+    return {"id": uid, "email": email.lower().strip(), "name": name}
+
+
+async def get_user_by_email(email: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, email, password_hash, name, settings FROM users WHERE email=?",
+            (email.lower().strip(),),
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_user_by_id(user_id: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, email, name, settings, created_at FROM users WHERE id=?",
+            (user_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_user_settings(user_id: str) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT settings, name FROM users WHERE id=?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return {}
+    try:
+        cfg = json.loads(row["settings"] or "{}")
+    except Exception:
+        cfg = {}
+    if row["name"]:
+        cfg.setdefault("user_name", row["name"])
+    return cfg
+
+
+async def save_user_settings(user_id: str, settings: dict) -> dict:
+    """Merge new settings into existing user settings and persist."""
+    existing = await get_user_settings(user_id)
+    # Don't overwrite masked API key with masked value
+    for key in ("openrouter_api_key",):
+        new_val = settings.get(key, "")
+        if new_val.startswith("sk-or-...") or new_val == "":
+            settings.pop(key, None)
+    merged = {**existing, **settings}
+    # Keep user name in sync
+    name = merged.get("user_name", "")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET settings=?, name=? WHERE id=?",
+            (json.dumps(merged), name, user_id),
+        )
+        await db.commit()
+    return merged
+
+
+async def user_count() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            row = await cur.fetchone()
+    return row[0] if row else 0
+
+
+# ── Sessions ───────────────────────────────────────────────────────────────────
+
+async def create_session(user_id: str = None) -> dict:
+    sid = str(uuid.uuid4())
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO sessions (id, user_id) VALUES (?, ?)", (sid, user_id)
+        )
+        await db.commit()
+    return {"id": sid, "title": "New Chat", "created_at": datetime.utcnow().isoformat()}
+
+
+async def get_sessions(user_id: str = None) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if user_id:
+            async with db.execute(
+                "SELECT id, title, created_at, updated_at, pinned, sort_order FROM sessions "
+                "WHERE user_id=? ORDER BY pinned DESC, sort_order ASC, updated_at DESC",
+                (user_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT id, title, created_at, updated_at, pinned, sort_order FROM sessions "
+                "ORDER BY pinned DESC, sort_order ASC, updated_at DESC"
+            ) as cur:
+                rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def pin_session(session_id: str, pinned: bool, user_id: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        if user_id:
+            await db.execute(
+                "UPDATE sessions SET pinned=? WHERE id=? AND user_id=?",
+                (1 if pinned else 0, session_id, user_id),
+            )
+        else:
+            await db.execute(
+                "UPDATE sessions SET pinned=? WHERE id=?",
+                (1 if pinned else 0, session_id),
+            )
+        await db.commit()
+
+
+async def reorder_sessions(order: list, user_id: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        for idx, session_id in enumerate(order):
+            if user_id:
+                await db.execute(
+                    "UPDATE sessions SET sort_order=? WHERE id=? AND user_id=?",
+                    (idx, session_id, user_id),
+                )
+            else:
+                await db.execute(
+                    "UPDATE sessions SET sort_order=? WHERE id=?", (idx, session_id)
+                )
+        await db.commit()
+
+
+async def update_session_title(session_id: str, title: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET title=?, updated_at=datetime('now') WHERE id=?",
+            (title[:60], session_id),
+        )
+        await db.commit()
+
+
+async def touch_session(session_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET updated_at=datetime('now') WHERE id=?", (session_id,)
+        )
+        await db.commit()
+
+
+async def save_message(session_id: str, role: str, content: str = None,
+                       tool_calls=None, tool_call_id: str = None, name: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, name)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                session_id, role, content,
+                json.dumps(tool_calls) if tool_calls else None,
+                tool_call_id, name,
+            ),
+        )
+        await db.commit()
+
+
+async def get_messages(session_id: str) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT role, content, tool_calls, tool_call_id, name, created_at
+               FROM messages WHERE session_id=? ORDER BY id""",
+            (session_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+    result = []
+    for r in rows:
+        msg = {"role": r["role"]}
+        if r["content"] is not None:
+            msg["content"] = r["content"]
+        if r["tool_calls"]:
+            msg["tool_calls"] = json.loads(r["tool_calls"])
+        if r["tool_call_id"]:
+            msg["tool_call_id"] = r["tool_call_id"]
+        if r["name"]:
+            msg["name"] = r["name"]
+        result.append(msg)
+    return result
+
+
+async def delete_session(session_id: str, user_id: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+        if user_id:
+            await db.execute(
+                "DELETE FROM sessions WHERE id=? AND user_id=?", (session_id, user_id)
+            )
+        else:
+            await db.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+        await db.commit()
+
+
+# ── Facts (Memory) ─────────────────────────────────────────────────────────────
+
+async def save_fact(fact: str, user_id: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO facts (fact, user_id) VALUES (?, ?)", (fact, user_id)
+        )
+        await db.commit()
+
+
+async def search_facts(query: str, user_id: str = None) -> list[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        terms = query.lower().split()
+        conditions = " AND ".join(["lower(fact) LIKE ?" for _ in terms])
+        params = [f"%{t}%" for t in terms]
+        if user_id:
+            sql = f"SELECT fact FROM facts WHERE user_id=? AND {conditions} ORDER BY id DESC LIMIT 20"
+            params = [user_id] + params
+        else:
+            sql = f"SELECT fact FROM facts WHERE {conditions} ORDER BY id DESC LIMIT 20"
+        async with db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+    return [r["fact"] for r in rows]
+
+
+async def get_all_facts(user_id: str = None) -> list[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if user_id:
+            async with db.execute(
+                "SELECT fact FROM facts WHERE user_id=? ORDER BY id DESC LIMIT 50", (user_id,)
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute("SELECT fact FROM facts ORDER BY id DESC LIMIT 50") as cur:
+                rows = await cur.fetchall()
+    return [r["fact"] for r in rows]
+
+
+async def get_all_facts_with_ids(user_id: str = None) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if user_id:
+            async with db.execute(
+                "SELECT id, fact, created_at FROM facts WHERE user_id=? ORDER BY id DESC LIMIT 200",
+                (user_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT id, fact, created_at FROM facts ORDER BY id DESC LIMIT 200"
+            ) as cur:
+                rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def delete_fact(fact_id: int, user_id: str = None) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        if user_id:
+            cur = await db.execute(
+                "DELETE FROM facts WHERE id=? AND user_id=?", (fact_id, user_id)
+            )
+        else:
+            cur = await db.execute("DELETE FROM facts WHERE id=?", (fact_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+# ── RAG Vault ─────────────────────────────────────────────────────────────────
+
+async def vault_add(title: str, content: str, user_id: str = None) -> str:
+    doc_id = str(uuid.uuid4())[:8]
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO vault (id, user_id, title, content) VALUES (?, ?, ?, ?)",
+            (doc_id, user_id, title[:200], content),
+        )
+        await db.commit()
+    return doc_id
+
+
+async def vault_search(query: str, user_id: str = None) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        terms = query.lower().split()[:5]
+        conditions = " OR ".join(["lower(content) LIKE ? OR lower(title) LIKE ?" for _ in terms])
+        params = [p for t in terms for p in (f"%{t}%", f"%{t}%")]
+        if user_id:
+            sql = f"SELECT id, title, content, created_at FROM vault WHERE user_id=? AND ({conditions}) ORDER BY created_at DESC LIMIT 10"
+            params = [user_id] + params
+        else:
+            sql = f"SELECT id, title, content, created_at FROM vault WHERE {conditions} ORDER BY created_at DESC LIMIT 10"
+        async with db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def vault_list(user_id: str = None) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if user_id:
+            async with db.execute(
+                "SELECT id, title, length(content) as chars, created_at FROM vault WHERE user_id=? ORDER BY created_at DESC",
+                (user_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT id, title, length(content) as chars, created_at FROM vault ORDER BY created_at DESC"
+            ) as cur:
+                rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def vault_delete(doc_id: str, user_id: str = None) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        if user_id:
+            cur = await db.execute(
+                "DELETE FROM vault WHERE id=? AND user_id=?", (doc_id, user_id)
+            )
+        else:
+            cur = await db.execute("DELETE FROM vault WHERE id=?", (doc_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+# ── Analytics ─────────────────────────────────────────────────────────────────
+
+async def track_event(event_type: str, tool_name: str = None, model: str = None,
+                      tokens: int = 0, session_id: str = None, user_id: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO analytics (event_type, tool_name, model, tokens, session_id, user_id) VALUES (?,?,?,?,?,?)",
+            (event_type, tool_name, model, tokens or 0, session_id, user_id),
+        )
+        await db.commit()
+
+
+async def get_analytics(user_id: str = None) -> dict:
+    uid_filter = "WHERE user_id=?" if user_id else ""
+    uid_and    = "AND user_id=?" if user_id else ""
+    p          = [user_id] if user_id else []
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        async with db.execute(
+            f"SELECT tool_name, COUNT(*) as cnt FROM analytics {uid_filter} {'AND' if uid_filter else 'WHERE'} event_type='tool' AND tool_name IS NOT NULL GROUP BY tool_name ORDER BY cnt DESC LIMIT 15".replace("WHERE AND","WHERE"),
+            p,
+        ) as cur:
+            top_tools = [{"tool": r["tool_name"], "count": r["cnt"]} for r in await cur.fetchall()]
+
+        async with db.execute(
+            f"SELECT model, COUNT(*) as cnt FROM analytics WHERE event_type='llm' AND model IS NOT NULL {uid_and} GROUP BY model ORDER BY cnt DESC",
+            p,
+        ) as cur:
+            model_usage = [{"model": r["model"], "count": r["cnt"]} for r in await cur.fetchall()]
+
+        async with db.execute(
+            f"SELECT COALESCE(SUM(tokens),0) as total FROM analytics {uid_filter}",
+            p,
+        ) as cur:
+            row = await cur.fetchone()
+            total_tokens = row["total"] if row else 0
+
+        async with db.execute(
+            f"SELECT date(created_at) as day, COUNT(*) as cnt FROM analytics {uid_filter} GROUP BY day ORDER BY day DESC LIMIT 14",
+            p,
+        ) as cur:
+            daily = [{"day": r["day"], "count": r["cnt"]} for r in await cur.fetchall()]
+
+        sc_filter = f"WHERE user_id=?" if user_id else ""
+        async with db.execute(f"SELECT COUNT(*) as cnt FROM sessions {sc_filter}", p) as cur:
+            row = await cur.fetchone()
+            session_count = row["cnt"] if row else 0
+
+    return {
+        "top_tools": top_tools,
+        "model_usage": model_usage,
+        "total_tokens": total_tokens,
+        "daily_activity": daily,
+        "session_count": session_count,
+    }
+
+
+# ── Personas (stored in user settings) ────────────────────────────────────────
+
+async def get_personas(user_id: str = None) -> list[dict]:
+    if user_id:
+        cfg = await get_user_settings(user_id)
+    else:
+        cfg = settings_store.load()
+    return cfg.get("personas", [])
+
+
+async def save_persona(persona: dict, user_id: str = None) -> dict:
+    new_persona = {
+        "id": str(uuid.uuid4()),
+        "name": persona.get("name", "Unnamed"),
+        "description": persona.get("description", ""),
+        "system_prompt": persona.get("system_prompt", ""),
+        "builtin": False,
+    }
+    if user_id:
+        cfg = await get_user_settings(user_id)
+        personas = cfg.get("personas", [])
+        personas.append(new_persona)
+        await save_user_settings(user_id, {"personas": personas})
+    else:
+        cfg = settings_store.load()
+        personas = cfg.get("personas", [])
+        personas.append(new_persona)
+        settings_store.save({"personas": personas})
+    return new_persona
+
+
+async def delete_persona(persona_id: str, user_id: str = None) -> bool:
+    if user_id:
+        cfg = await get_user_settings(user_id)
+        personas = cfg.get("personas", [])
+        original_len = len(personas)
+        personas = [p for p in personas if p["id"] != persona_id or p.get("builtin", False)]
+        if len(personas) == original_len:
+            return False
+        await save_user_settings(user_id, {"personas": personas})
+    else:
+        cfg = settings_store.load()
+        personas = cfg.get("personas", [])
+        original_len = len(personas)
+        personas = [p for p in personas if p["id"] != persona_id or p.get("builtin", False)]
+        if len(personas) == original_len:
+            return False
+        settings_store.save({"personas": personas})
+    return True
+
+
+# ── Custom Tools ───────────────────────────────────────────────────────────────
+
+async def get_custom_tools(user_id: str = None) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if user_id:
+            async with db.execute(
+                "SELECT id, name, description, command, created_at FROM custom_tools WHERE user_id=? ORDER BY created_at DESC",
+                (user_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT id, name, description, command, created_at FROM custom_tools ORDER BY created_at DESC"
+            ) as cur:
+                rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def save_custom_tool(tool: dict, user_id: str = None) -> dict:
+    tool_id = str(uuid.uuid4())
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO custom_tools (id, user_id, name, description, command) VALUES (?, ?, ?, ?, ?)",
+            (tool_id, user_id, tool.get("name", ""), tool.get("description", ""), tool.get("command", "")),
+        )
+        await db.commit()
+    return {"id": tool_id, "name": tool.get("name", ""), "description": tool.get("description", ""), "command": tool.get("command", "")}
+
+
+async def delete_custom_tool(tool_id: str, user_id: str = None) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        if user_id:
+            cur = await db.execute(
+                "DELETE FROM custom_tools WHERE id=? AND user_id=?", (tool_id, user_id)
+            )
+        else:
+            cur = await db.execute("DELETE FROM custom_tools WHERE id=?", (tool_id,))
+        await db.commit()
+        return cur.rowcount > 0

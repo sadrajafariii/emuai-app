@@ -1,0 +1,3086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>bud — Personal AI Agent</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#c8a45e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg:      '#0e0c0a', sidebar: '#131110', panel: '#1a1815',
+            panelb:  '#201e1b', border: '#2a2520',  borderl: '#352f28',
+            gold:    '#c8a45e', goldh:  '#d4b373',  goldd: '#a07840',
+            cream:   '#e4d8c4', muted:  '#8a7e6e',  faint: '#5a5045',
+            input:   '#161412', code:   '#181410',
+          },
+          fontFamily: {
+            serif: ['"EB Garamond"', 'Georgia', 'serif'],
+            mono:  ['"JetBrains Mono"', 'Menlo', 'monospace'],
+            sans:  ['system-ui', '-apple-system', 'sans-serif'],
+          },
+        },
+      },
+    }
+  </script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0e0c0a; color: #e4d8c4; font-family: system-ui, sans-serif; }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #352f28; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #c8a45e55; }
+
+    /* Prose */
+    .prose h1,.prose h2,.prose h3 { font-family:'EB Garamond',serif; color:#e4d8c4; margin:1em 0 .4em; }
+    .prose h1{font-size:1.5rem;} .prose h2{font-size:1.25rem;} .prose h3{font-size:1.1rem;}
+    .prose p{margin:.5em 0;line-height:1.7;}
+    .prose ul,.prose ol{margin:.5em 0 .5em 1.4em;} .prose li{margin:.25em 0;}
+    .prose strong{color:#d4b373;font-weight:600;} .prose em{color:#c8a45e;}
+    .prose a{color:#c8a45e;text-decoration:underline;text-underline-offset:3px;}
+    .prose a:hover{color:#d4b373;}
+    .prose code{font-family:'JetBrains Mono',monospace;font-size:.85em;background:#181410;color:#d4b373;padding:.15em .4em;border-radius:3px;border:1px solid #2a2520;}
+    .prose pre{background:#181410;border:1px solid #2a2520;border-radius:6px;padding:1em;overflow-x:auto;margin:.75em 0;}
+    .prose pre code{background:none;border:none;padding:0;color:#d4c8a8;}
+    .prose blockquote{border-left:3px solid #c8a45e;padding-left:1em;color:#8a7e6e;margin:.75em 0;font-style:italic;}
+    .prose table{border-collapse:collapse;width:100%;margin:.75em 0;}
+    .prose th{background:#201e1b;color:#c8a45e;text-align:left;padding:.5em .75em;border:1px solid #2a2520;font-family:'EB Garamond',serif;}
+    .prose td{padding:.4em .75em;border:1px solid #2a2520;}
+    .prose tr:nth-child(even) td{background:#161412;}
+    .prose hr{border-color:#2a2520;margin:1em 0;}
+
+    textarea{resize:none;field-sizing:content;min-height:44px;max-height:240px;}
+
+    .session-item{transition:background .15s;cursor:pointer;}
+    .session-item:hover{background:#1a1815;}
+    .session-item.active{background:#201e1b;border-left:2px solid #c8a45e;}
+
+    .tool-card{border:1px solid #2a2520;border-radius:8px;overflow:hidden;margin-bottom:.75rem;transition:border-color .2s;}
+    .tool-card:hover{border-color:#c8a45e44;}
+    .tool-card.status-pass{border-color:#1a4a2a;} .tool-card.status-fail{border-color:#4a1a1a;}
+    .tool-header{display:flex;align-items:center;gap:.6rem;padding:.6rem .8rem;background:#201e1b;cursor:pointer;user-select:none;}
+    .tool-body{padding:.75rem;background:#161412;display:none;}
+    .tool-body.open{display:block;}
+
+    .badge-pass{background:#0e2e18;border:1px solid #1e5a30;color:#4caf7d;border-radius:4px;font-size:.6rem;font-family:'JetBrains Mono',monospace;padding:.1em .45em;}
+    .badge-fail{background:#2e0e0e;border:1px solid #5a1e1e;color:#e06060;border-radius:4px;font-size:.6rem;font-family:'JetBrains Mono',monospace;padding:.1em .45em;}
+    .badge-run {background:#1e1a10;border:1px solid #5a4a1e;color:#c8a45e;border-radius:4px;font-size:.6rem;font-family:'JetBrains Mono',monospace;padding:.1em .45em;}
+
+    .code-output{font-family:'JetBrains Mono',monospace;font-size:.72rem;line-height:1.6;padding:.65rem .75rem;border-radius:5px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;}
+    .code-output.pass{background:#0a1f10;border:1px solid #1a4a2a;color:#7ec89a;}
+    .code-output.fail{background:#1f0a0a;border:1px solid #4a1a1a;color:#e08080;}
+    .code-output.info{background:#0e0c0a;border:1px solid #2a2520;color:#c8b890;}
+
+    .attempt-pill{font-size:.6rem;font-family:'JetBrains Mono',monospace;background:#201e1b;border:1px solid #352f28;color:#8a7e6e;border-radius:10px;padding:.1em .5em;}
+
+    @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+    .pulse{animation:pulse-dot 1.2s ease-in-out infinite;}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+    .blink{animation:blink 1s step-end infinite;}
+
+    .preview-img{border-radius:6px;border:1px solid #2a2520;cursor:zoom-in;transition:opacity .2s;}
+    .preview-img:hover{opacity:.85;}
+
+    #lightbox{display:none;position:fixed;inset:0;background:#000000cc;z-index:999;align-items:center;justify-content:center;}
+    #lightbox.show{display:flex;}
+    #lightbox img{max-width:92vw;max-height:92vh;border-radius:8px;border:1px solid #c8a45e55;}
+
+    .gold-line{height:1px;background:linear-gradient(90deg,transparent,#c8a45e44,transparent);}
+
+    #mic-btn{transition:all .2s;}
+    #mic-btn.recording{background:#c0392b!important;box-shadow:0 0 0 4px #c0392b33;animation:micPulse 1s ease-in-out infinite;}
+    @keyframes micPulse{0%,100%{box-shadow:0 0 0 4px #c0392b33}50%{box-shadow:0 0 0 8px #c0392b11}}
+
+    #chat-messages.drag-over{outline:2px dashed #c8a45e;outline-offset:-6px;}
+    .attached-file{display:inline-flex;align-items:center;gap:.4rem;background:#201e1b;border:1px solid #352f28;border-radius:6px;padding:.25rem .6rem;font-size:.7rem;font-family:'JetBrains Mono',monospace;color:#8a7e6e;margin:.25rem .25rem 0 0;}
+    .attached-file .remove-file{cursor:pointer;color:#5a5045;margin-left:.2rem;}
+    .attached-file .remove-file:hover{color:#e06060;}
+
+    .file-tree-item{cursor:pointer;padding:.25rem .5rem;border-radius:4px;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#8a7e6e;transition:background .1s;display:flex;align-items:center;gap:.4rem;}
+    .file-tree-item:hover{background:#1a1815;color:#c8a45e;}
+
+    .pane-tab{cursor:pointer;padding:.3rem .75rem;font-size:.72rem;border-radius:4px;transition:all .15s;}
+    .pane-tab.active{background:#201e1b;color:#c8a45e;}
+    .pane-tab:not(.active){color:#5a5045;}
+    .pane-tab:not(.active):hover{color:#8a7e6e;}
+
+    #chat-messages,#activity-feed,#session-list{overflow-y:auto;}
+    #user-input:focus{outline:none;border-color:#c8a45e66;box-shadow:0 0 0 2px #c8a45e18;}
+
+    @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    .fade-in{animation:fadeIn .25s ease forwards;}
+
+    .model-badge{font-family:'JetBrains Mono',monospace;font-size:.65rem;padding:.2em .55em;border-radius:4px;background:#201e1b;border:1px solid #2a2520;color:#8a7e6e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
+
+    #computer-view{display:none;flex-direction:column;flex-shrink:0;border-bottom:1px solid #2a2520;border-radius:8px;overflow:hidden;margin:.5rem;border:1px solid #2a2520;}
+    #computer-view.active{display:flex;}
+    #browser-frame-wrap img{width:100%;height:auto;display:block;}
+
+    .browser-chrome{background:#1a1815;border-bottom:1px solid #2a2520;padding:.4rem .6rem;display:flex;align-items:center;gap:.5rem;flex-shrink:0;}
+    .browser-dots{display:flex;gap:4px;flex-shrink:0;}
+    .browser-dot{width:9px;height:9px;border-radius:50%;}
+    .browser-urlbar{flex:1;background:#0e0c0a;border:1px solid #2a2520;border-radius:5px;padding:.2rem .6rem;font-family:'JetBrains Mono',monospace;font-size:.65rem;color:#8a7e6e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .browser-action-label{font-size:.65rem;font-family:'JetBrains Mono',monospace;color:#c8a45e;background:#201e1b;border:1px solid #2a2520;padding:.15rem .5rem;border-radius:4px;white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis;}
+
+    #browser-frame-wrap{position:relative;background:#000;overflow:hidden;max-height:480px;display:flex;align-items:flex-start;}
+    #browser-live-img{width:100%;display:block;cursor:zoom-in;transition:opacity .18s ease;}
+    #frame-loading-overlay{position:absolute;inset:0;background:linear-gradient(180deg,transparent 50%,#0e0c0a11 50%);background-size:100% 4px;pointer-events:none;opacity:0;transition:opacity .2s;}
+    #frame-loading-overlay.show{opacity:1;}
+    @keyframes typeCursor{0%,100%{border-color:#c8a45e}50%{border-color:transparent}}
+    .typing-cursor{border-right:2px solid #c8a45e;animation:typeCursor .7s step-end infinite;padding-right:2px;}
+
+    #thinking-panel{display:none!important;}
+    .thinking-content{display:none;}
+    .thinking-header{display:none;}
+    @keyframes thinkPulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .think-pulse{animation:thinkPulse 1.4s ease-in-out infinite;}
+
+    /* ── Permission modal ── */
+    #perm-modal{display:none;position:fixed;inset:0;background:#00000088;z-index:500;align-items:center;justify-content:center;}
+    #perm-modal.show{display:flex;}
+    .perm-box{background:#1a1815;border:1px solid #c8a45e55;border-radius:12px;padding:1.5rem;max-width:420px;width:92%;box-shadow:0 20px 60px #00000066;}
+
+    /* ── Settings modal ── */
+    #settings-modal{display:none;position:fixed;inset:0;background:#00000099;z-index:600;align-items:center;justify-content:center;}
+    #settings-modal.show{display:flex;}
+    .settings-box{background:#131110;border:1px solid #2a2520;border-radius:14px;width:min(800px,95vw);max-height:85vh;display:flex;overflow:hidden;box-shadow:0 30px 80px #00000077;}
+    .settings-sidebar{width:180px;flex-shrink:0;border-right:1px solid #2a2520;padding:1rem 0;background:#0e0c0a;}
+    .settings-nav-item{padding:.55rem 1rem;font-size:.8rem;cursor:pointer;color:#8a7e6e;transition:all .15s;display:flex;align-items:center;gap:.6rem;}
+    .settings-nav-item:hover{background:#1a1815;color:#c8a45e;}
+    .settings-nav-item.active{background:#1a1815;color:#c8a45e;border-left:2px solid #c8a45e;}
+    .settings-content{flex:1;overflow-y:auto;padding:1.75rem;}
+    .settings-section{display:none;}
+    .settings-section.active{display:block;}
+    .settings-label{font-size:.75rem;color:#8a7e6e;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem;}
+    .settings-input{width:100%;background:#0e0c0a;border:1px solid #2a2520;border-radius:7px;padding:.55rem .75rem;font-size:.85rem;color:#e4d8c4;outline:none;font-family:'JetBrains Mono',monospace;transition:border-color .15s;}
+    .settings-input:focus{border-color:#c8a45e66;}
+    .settings-select{width:100%;background:#0e0c0a;border:1px solid #2a2520;border-radius:7px;padding:.55rem .75rem;font-size:.85rem;color:#e4d8c4;outline:none;font-family:'JetBrains Mono',monospace;}
+    .settings-toggle{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;}
+    .settings-toggle input{opacity:0;width:0;height:0;}
+    .toggle-slider{position:absolute;inset:0;background:#2a2520;border-radius:22px;transition:.2s;cursor:pointer;}
+    .toggle-slider:before{content:'';position:absolute;height:16px;width:16px;left:3px;bottom:3px;background:#5a5045;border-radius:50%;transition:.2s;}
+    input:checked+.toggle-slider{background:#2a4a1a;}
+    input:checked+.toggle-slider:before{transform:translateX(18px);background:#4caf7d;}
+    .settings-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.1rem;}
+    .settings-row-label{font-size:.85rem;color:#c8b890;}
+    .settings-row-desc{font-size:.72rem;color:#5a5045;margin-top:.15rem;}
+    .settings-save-btn{width:100%;padding:.65rem;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .15s;background:#1a3a1a;border:1px solid #2a6a2a;color:#4caf7d;}
+    .settings-save-btn:hover{background:#1e4a1e;}
+
+    /* ── Search overlay ── */
+    #search-overlay{display:none;position:fixed;inset:0;background:#00000099;z-index:700;padding-top:15vh;justify-content:center;align-items:flex-start;}
+    #search-overlay.show{display:flex;}
+    .search-box{background:#1a1815;border:1px solid #352f28;border-radius:12px;width:min(580px,92vw);box-shadow:0 20px 60px #00000066;overflow:hidden;}
+    .search-input-wrap{display:flex;align-items:center;gap:.75rem;padding:.85rem 1rem;border-bottom:1px solid #2a2520;}
+    .search-input{flex:1;background:transparent;border:none;outline:none;font-size:1rem;color:#e4d8c4;font-family:system-ui,sans-serif;}
+    .search-input::placeholder{color:#5a5045;}
+    .search-results{max-height:350px;overflow-y:auto;}
+    .search-result-item{padding:.6rem 1rem;cursor:pointer;border-bottom:1px solid #1a1815;transition:background .1s;}
+    .search-result-item:hover,.search-result-item.focused{background:#201e1b;}
+    .search-result-title{font-size:.85rem;color:#e4d8c4;}
+    .search-result-meta{font-size:.72rem;color:#5a5045;margin-top:.15rem;font-family:'JetBrains Mono',monospace;}
+    .search-empty{padding:2rem;text-align:center;color:#5a5045;font-size:.85rem;}
+
+    /* ── Prompt templates ── */
+    #templates-popover{display:none;position:absolute;bottom:calc(100% + 8px);left:0;right:0;background:#1a1815;border:1px solid #352f28;border-radius:10px;z-index:200;max-height:240px;overflow-y:auto;box-shadow:0 10px 30px #00000066;}
+    #templates-popover.show{display:block;}
+    .template-item{padding:.55rem .85rem;cursor:pointer;transition:background .1s;border-bottom:1px solid #161412;}
+    .template-item:last-child{border-bottom:none;}
+    .template-item:hover{background:#201e1b;}
+    .template-title{font-size:.8rem;color:#c8a45e;font-family:'JetBrains Mono',monospace;}
+    .template-preview{font-size:.72rem;color:#5a5045;margin-top:.1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+    /* ── Token counter ── */
+    .token-badge{font-family:'JetBrains Mono',monospace;font-size:.62rem;padding:.2em .5em;border-radius:4px;background:#161412;border:1px solid #2a2520;color:#5a5045;white-space:nowrap;}
+
+    /* ── TTS speaking indicator ── */
+    #tts-indicator{display:none;align-items:center;gap:.4rem;font-size:.7rem;color:#8a7e6e;font-family:'JetBrains Mono',monospace;}
+    #tts-indicator.show{display:flex;}
+    @keyframes speakPulse{0%,100%{opacity:.4}50%{opacity:1}}
+    .speak-bar{width:3px;background:#c8a45e;border-radius:2px;animation:speakPulse .6s ease-in-out infinite;}
+
+    /* Scrollable containers */
+    #chat-messages,#activity-feed,#session-list{overflow-y:auto;}
+
+    /* Gold gradient divider */
+    .gold-line{height:1px;background:linear-gradient(90deg,transparent,#c8a45e44,transparent);}
+
+    /* ── Mobile overlay for sidebar ── */
+    #sidebar-overlay{display:none;position:fixed;inset:0;background:#00000088;z-index:199;}
+    #sidebar-overlay.show{display:block;}
+
+    /* ── Mobile bottom nav ── */
+    #mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;z-index:150;
+      background:#131110;border-top:1px solid #2a2520;
+      padding:0 0 env(safe-area-inset-bottom,0);}
+    #mobile-nav .mnav{display:flex;align-items:center;justify-content:space-around;height:52px;}
+    #mobile-nav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:2px;background:none;border:none;color:#8a7e6e;font-size:.55rem;cursor:pointer;padding:6px 0;transition:color .15s;}
+    #mobile-nav button.active{color:#c8a45e;}
+    #mobile-nav button svg{width:20px;height:20px;}
+
+    /* ── Mobile toggle for activity panel ── */
+    #mobile-activity-toggle{display:none;}
+
+    /* ── Thinking block (in-chat) ── */
+    /* ── Claude-style thinking block ── */
+    .thinking-block{background:#0d0b09;border:1px solid #222;border-radius:10px;margin:0 0 .75rem 0;overflow:hidden;font-family:'JetBrains Mono',monospace;}
+    .thinking-block-header{display:flex;align-items:center;gap:.5rem;padding:.6rem 1rem;cursor:pointer;user-select:none;border-bottom:1px solid #1c1a17;}
+    .thinking-block-header:hover{background:#111;}
+    .thinking-spin{width:14px;height:14px;border:1.5px solid #3a3530;border-top-color:#c8a45e;border-radius:50%;animation:thinkSpin .8s linear infinite;flex-shrink:0;}
+    .thinking-done-icon{width:14px;height:14px;border-radius:50%;background:#2a4a2a;border:1.5px solid #3a7a3a;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:.55rem;color:#5a9a5a;}
+    @keyframes thinkSpin{to{transform:rotate(360deg)}}
+    .thinking-label{font-size:.72rem;color:#6a6055;letter-spacing:.02em;}
+    .thinking-timer{font-size:.65rem;color:#3a3530;margin-left:.25rem;}
+    .thinking-toggle{margin-left:auto;font-size:.65rem;color:#3a3530;transition:color .15s;}
+    .thinking-block-header:hover .thinking-toggle{color:#6a6055;}
+    .thinking-block-body{padding:.75rem 1rem;font-size:.7rem;color:#4a4540;line-height:1.8;white-space:pre-wrap;max-height:280px;overflow-y:auto;font-style:italic;}
+    .thinking-block-body.collapsed{display:none;}
+    .thinking-block-body::-webkit-scrollbar{width:3px;}
+    .thinking-block-body::-webkit-scrollbar-thumb{background:#2a2520;}
+
+    /* ── Image input ── */
+    .img-preview{width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #352f28;cursor:pointer;}
+    .msg-image{max-width:300px;border-radius:8px;margin:.25rem 0;}
+
+    /* ── Canvas panel ── */
+    #canvas-panel{display:none;flex:1;flex-direction:column;border-left:1px solid #2a2520;background:#0d0b09;}
+    #canvas-panel.show{display:flex;}
+    #canvas-editor{flex:1;background:transparent;color:#e4d8c4;font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:1rem;border:none;outline:none;resize:none;line-height:1.7;}
+    .canvas-toolbar{padding:.4rem .75rem;border-bottom:1px solid #2a2520;display:flex;gap:.5rem;align-items:center;background:#131110;}
+    .canvas-btn{padding:.25rem .6rem;background:#201e1b;border:1px solid #2a2520;border-radius:5px;color:#8a7e6e;font-size:.72rem;cursor:pointer;}
+    .canvas-btn:hover{color:#c8a45e;border-color:#c8a45e44;}
+    .send-to-canvas{display:none;font-size:.65rem;padding:.15rem .4rem;background:#1a1510;border:1px solid #c8a45e33;border-radius:4px;color:#c8a45e88;cursor:pointer;margin-left:.5rem;}
+    .prose-wrapper:hover .send-to-canvas{display:inline;}
+
+    /* ── Pin button on sessions ── */
+    .session-item:hover .pin-btn{opacity:.5!important;}
+
+    @media (max-width: 768px) {
+      /* Sidebar becomes a slide-in drawer */
+      #main-sidebar {
+        position: fixed !important;
+        left: -280px !important;
+        top: 0; bottom: 0;
+        width: 280px !important;
+        z-index: 200;
+        transition: left .25s ease;
+        overflow-y: auto;
+      }
+      #main-sidebar.mobile-open {
+        left: 0 !important;
+      }
+
+      /* Activity panel hidden by default on mobile */
+      #activity-panel {
+        position: fixed !important;
+        right: -100% !important;
+        top: 0; bottom: 52px;
+        width: 100% !important;
+        z-index: 190;
+        transition: right .25s ease;
+        overflow-y: auto;
+      }
+      #activity-panel.mobile-open {
+        right: 0 !important;
+      }
+
+      /* Main chat takes full width */
+      body > main {
+        width: 100% !important;
+        flex: 1 !important;
+        padding-bottom: 52px;
+      }
+
+      /* Header adjustments */
+      header { padding: 0.5rem 1rem !important; }
+      header h1 { font-size: 1rem !important; }
+
+      /* Input area */
+      #input-area { padding: 0.5rem !important; }
+
+      /* Settings modal full screen on mobile */
+      .settings-box {
+        width: 100vw !important;
+        max-height: 100vh !important;
+        border-radius: 0 !important;
+        flex-direction: column !important;
+      }
+      .settings-sidebar {
+        width: 100% !important;
+        display: flex !important;
+        flex-direction: row !important;
+        overflow-x: auto !important;
+        border-right: none !important;
+        border-bottom: 1px solid #2a2520 !important;
+        padding: 0 !important;
+      }
+      .settings-nav-item { white-space: nowrap; padding: .5rem .75rem !important; font-size:.7rem !important; }
+      .settings-content { padding: 1rem !important; }
+
+      /* Show bottom nav */
+      #mobile-nav { display: block !important; }
+
+      /* Hide desktop export/share buttons label text */
+      header .export-label { display: none; }
+    }
+  </style>
+</head>
+
+<body class="h-screen flex overflow-hidden">
+
+<!-- ══ LIGHTBOX ═══════════════════════════════════════════════════════════════ -->
+<div id="lightbox" onclick="closeLightbox()">
+  <img id="lightbox-img" src="" alt="Preview" />
+</div>
+
+<!-- ══ MOBILE SIDEBAR OVERLAY ════════════════════════════════════════════════ -->
+<!-- ══ AUTH OVERLAY ════════════════════════════════════════════════════════════ -->
+<div id="auth-overlay" style="position:fixed;inset:0;background:#0e0c0a;z-index:2000;display:flex;align-items:center;justify-content:center;flex-direction:column;">
+  <div style="background:#131110;border:1px solid #2a2520;border-radius:14px;width:min(400px,94vw);padding:2rem;box-shadow:0 30px 80px #00000077;">
+    <!-- Logo -->
+    <div style="text-align:center;margin-bottom:1.5rem;">
+      <h1 style="font-family:'EB Garamond',serif;font-size:2rem;color:#c8a45e;margin-bottom:.25rem;">bud</h1>
+      <p style="color:#5a5045;font-size:.8rem;">Personal AI Agent</p>
+    </div>
+
+    <!-- Tabs -->
+    <div style="display:flex;border-bottom:1px solid #2a2520;margin-bottom:1.5rem;">
+      <button id="auth-tab-login" onclick="authTab('login')" style="flex:1;padding:.6rem;background:none;border:none;border-bottom:2px solid #c8a45e;color:#c8a45e;font-size:.85rem;cursor:pointer;transition:all .15s;">Sign In</button>
+      <button id="auth-tab-register" onclick="authTab('register')" style="flex:1;padding:.6rem;background:none;border:none;border-bottom:2px solid transparent;color:#5a5045;font-size:.85rem;cursor:pointer;transition:all .15s;">Create Account</button>
+    </div>
+
+    <!-- Login form -->
+    <div id="auth-form-login">
+      <div style="margin-bottom:.85rem;">
+        <p style="font-size:.72rem;color:#8a7e6e;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.35rem;">Email</p>
+        <input id="auth-login-email" type="email" placeholder="you@example.com" autocomplete="email"
+          style="width:100%;background:#0e0c0a;border:1px solid #2a2520;border-radius:7px;padding:.6rem .75rem;font-size:.9rem;color:#e4d8c4;outline:none;font-family:system-ui;"
+          onkeydown="if(event.key==='Enter')authLogin()" />
+      </div>
+      <div style="margin-bottom:1.25rem;">
+        <p style="font-size:.72rem;color:#8a7e6e;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.35rem;">Password</p>
+        <input id="auth-login-password" type="password" placeholder="••••••••" autocomplete="current-password"
+          style="width:100%;background:#0e0c0a;border:1px solid #2a2520;border-radius:7px;padding:.6rem .75rem;font-size:.9rem;color:#e4d8c4;outline:none;font-family:system-ui;"
+          onkeydown="if(event.key==='Enter')authLogin()" />
+      </div>
+      <p id="auth-login-error" style="color:#e06060;font-size:.75rem;margin-bottom:.75rem;display:none;"></p>
+      <button onclick="authLogin()"
+        style="width:100%;padding:.7rem;background:#c8a45e;border:none;border-radius:8px;color:#0e0c0a;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .15s;">
+        Sign In
+      </button>
+    </div>
+
+    <!-- Register form -->
+    <div id="auth-form-register" style="display:none;">
+      <div style="margin-bottom:.85rem;">
+        <p style="font-size:.72rem;color:#8a7e6e;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.35rem;">Your Name</p>
+        <input id="auth-reg-name" type="text" placeholder="Alex" autocomplete="name"
+          style="width:100%;background:#0e0c0a;border:1px solid #2a2520;border-radius:7px;padding:.6rem .75rem;font-size:.9rem;color:#e4d8c4;outline:none;font-family:system-ui;" />
+      </div>
+      <div style="margin-bottom:.85rem;">
+        <p style="font-size:.72rem;color:#8a7e6e;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.35rem;">Email</p>
+        <input id="auth-reg-email" type="email" placeholder="you@example.com" autocomplete="email"
+          style="width:100%;background:#0e0c0a;border:1px solid #2a2520;border-radius:7px;padding:.6rem .75rem;font-size:.9rem;color:#e4d8c4;outline:none;font-family:system-ui;" />
+      </div>
+      <div style="margin-bottom:1.25rem;">
+        <p style="font-size:.72rem;color:#8a7e6e;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.35rem;">Password</p>
+        <input id="auth-reg-password" type="password" placeholder="At least 6 characters" autocomplete="new-password"
+          style="width:100%;background:#0e0c0a;border:1px solid #2a2520;border-radius:7px;padding:.6rem .75rem;font-size:.9rem;color:#e4d8c4;outline:none;font-family:system-ui;"
+          onkeydown="if(event.key==='Enter')authRegister()" />
+      </div>
+      <p id="auth-reg-error" style="color:#e06060;font-size:.75rem;margin-bottom:.75rem;display:none;"></p>
+      <button onclick="authRegister()"
+        style="width:100%;padding:.7rem;background:#c8a45e;border:none;border-radius:8px;color:#0e0c0a;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .15s;">
+        Create Account
+      </button>
+    </div>
+
+    <p style="text-align:center;font-size:.7rem;color:#3a3530;margin-top:1.25rem;">
+      By signing up you agree to the <a href="/privacy" style="color:#5a5045;">Privacy Policy</a>.
+    </p>
+  </div>
+</div>
+
+<div id="sidebar-overlay" onclick="closeMobileSidebar()"></div>
+
+<!-- ══ MOBILE BOTTOM NAV ══════════════════════════════════════════════════════ -->
+<div id="mobile-nav">
+  <div class="mnav">
+    <button id="mnav-chat" class="active" onclick="mobileNav('chat')">
+      <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+      Chat
+    </button>
+    <button id="mnav-activity" onclick="mobileNav('activity')">
+      <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      Activity
+    </button>
+    <button id="mnav-sessions" onclick="mobileNav('sessions')">
+      <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+      Sessions
+    </button>
+    <button onclick="openSettings()">
+      <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      Settings
+    </button>
+  </div>
+</div>
+
+<!-- ══ PERMISSION MODAL ═══════════════════════════════════════════════════════ -->
+<div id="perm-modal">
+  <div class="perm-box">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style="background:#2a1e10;border:1px solid #c8a45e44;">
+        <span class="text-lg">🔐</span>
+      </div>
+      <div>
+        <p class="text-sm font-serif text-cream">Permission Required</p>
+        <p class="text-xs text-faint mt-0.5">The agent is requesting system access</p>
+      </div>
+    </div>
+    <div class="rounded-lg p-3 mb-4 text-xs text-muted font-mono" style="background:#0e0c0a;border:1px solid #2a2520;">
+      <span id="perm-description"></span>
+    </div>
+    <p class="text-xs text-faint mb-4">Allow this once for this session?</p>
+    <div class="flex gap-3">
+      <button onclick="respondPermission(true)" class="flex-1 py-2 rounded-lg text-sm font-semibold" style="background:#1a3a22;border:1px solid #2a6a3a;color:#4caf7d;">Allow</button>
+      <button onclick="respondPermission(false)" class="flex-1 py-2 rounded-lg text-sm font-semibold" style="background:#2a1010;border:1px solid #5a2020;color:#e06060;">Deny</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SETTINGS MODAL ═════════════════════════════════════════════════════════ -->
+<div id="settings-modal" onclick="closeSettingsIfOutside(event)">
+  <div class="settings-box">
+    <!-- Sidebar -->
+    <div class="settings-sidebar">
+      <div class="px-4 pb-3 mb-2" style="border-bottom:1px solid #1a1815;">
+        <p class="text-xs text-faint uppercase tracking-widest">Settings</p>
+      </div>
+      <div class="settings-nav-item active" data-section="profile" onclick="switchSettingsTab('profile')">Profile</div>
+      <div class="settings-nav-item" data-section="ai"      onclick="switchSettingsTab('ai')">AI Engine</div>
+      <div class="settings-nav-item" data-section="ollama"  onclick="switchSettingsTab('ollama')">Ollama</div>
+      <div class="settings-nav-item" data-section="voice"   onclick="switchSettingsTab('voice')">Voice</div>
+      <div class="settings-nav-item" data-section="memory"  onclick="switchSettingsTab('memory')">Memory</div>
+      <div class="settings-nav-item" data-section="groq"    onclick="switchSettingsTab('groq')">Groq</div>
+      <div class="settings-nav-item" data-section="appear"  onclick="switchSettingsTab('appear')">Appearance</div>
+      <div class="settings-nav-item" data-section="analytics" onclick="switchSettingsTab('analytics');loadAnalytics()">Analytics</div>
+      <div class="settings-nav-item" data-section="personas" onclick="switchSettingsTab('personas');loadPersonas()">Personas</div>
+      <div class="settings-nav-item" data-section="memorybrowser" onclick="switchSettingsTab('memorybrowser');loadMemoryBrowser()">Memory</div>
+      <div class="settings-nav-item" data-section="commands" onclick="switchSettingsTab('commands');loadCommands()">Commands</div>
+    </div>
+
+    <!-- Content -->
+    <div class="settings-content">
+      <!-- Close button -->
+      <div class="flex justify-between items-center mb-5">
+        <h2 id="settings-section-title" class="font-serif text-lg text-cream">Profile</h2>
+        <button onclick="closeSettings()" class="text-faint hover:text-muted text-xl leading-none">✕</button>
+      </div>
+
+      <!-- Profile -->
+      <div class="settings-section active" id="section-profile">
+        <div class="mb-4">
+          <p class="settings-label">Your Name</p>
+          <input id="cfg-user-name" class="settings-input" placeholder="Friend" />
+          <p class="text-xs text-faint mt-1.5">bud will address you by this name.</p>
+        </div>
+      </div>
+
+      <!-- AI Engine -->
+      <div class="settings-section" id="section-ai">
+        <div class="mb-4">
+          <p class="settings-label">OpenRouter API Key</p>
+          <input id="cfg-api-key" class="settings-input" type="password" placeholder="sk-or-v1-…" autocomplete="off"/>
+          <p class="text-xs text-faint mt-1.5">Get a free key at <span class="text-gold">openrouter.ai</span>. Leave blank to use models that don't require a key.</p>
+        </div>
+        <div class="mb-4">
+          <p class="settings-label">Preferred Model</p>
+          <select id="cfg-preferred-model" class="settings-select">
+            <option value="auto">auto (smart fallback chain)</option>
+            <option value="deepseek/deepseek-r1:free">DeepSeek R1 (best reasoning)</option>
+            <option value="deepseek/deepseek-chat-v3-0324:free">DeepSeek Chat V3 (best coding)</option>
+            <option value="meta-llama/llama-4-maverick:free">Llama 4 Maverick</option>
+            <option value="meta-llama/llama-4-scout:free">Llama 4 Scout</option>
+            <option value="qwen/qwen3-235b-a22b:free">Qwen3 235B</option>
+            <option value="qwen/qwen3-30b-a3b:free">Qwen3 30B</option>
+            <option value="nousresearch/hermes-3-llama-3.1-405b:free">Hermes 3 405B</option>
+            <option value="google/gemma-3-27b-it:free">Gemma 3 27B</option>
+            <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B</option>
+          </select>
+        </div>
+        <div class="mb-4">
+          <p class="settings-label">Max Response Tokens</p>
+          <input id="cfg-max-tokens" class="settings-input" type="number" min="512" max="32000" step="512" />
+          <p class="text-xs text-faint mt-1.5">Higher = longer responses. Default 4096.</p>
+        </div>
+      </div>
+
+      <!-- Ollama -->
+      <div class="settings-section" id="section-ollama">
+        <div class="settings-row mb-5">
+          <div>
+            <div class="settings-row-label">Enable Ollama (Offline Mode)</div>
+            <div class="settings-row-desc">Run AI 100% locally — no internet, no API key needed.</div>
+          </div>
+          <label class="settings-toggle"><input id="cfg-ollama-enabled" type="checkbox" onchange="toggleOllamaFields()"><span class="toggle-slider"></span></label>
+        </div>
+        <div id="ollama-fields">
+          <div class="mb-4">
+            <p class="settings-label">Ollama Server URL</p>
+            <input id="cfg-ollama-url" class="settings-input" placeholder="http://localhost:11434" />
+          </div>
+          <div class="mb-4">
+            <p class="settings-label">Model Name</p>
+            <input id="cfg-ollama-model" class="settings-input" placeholder="llama3.2" />
+            <p class="text-xs text-faint mt-1.5">Run <code class="text-gold">ollama pull llama3.2</code> to download a model.</p>
+          </div>
+        </div>
+        <div class="rounded-lg p-3 text-xs" style="background:#0a1a0a;border:1px solid #1a3a1a;color:#4caf7d;">
+          💡 <strong>Private Mode tip:</strong> When Ollama is enabled, all AI runs on your machine. No data leaves your computer. Great for sensitive work.
+        </div>
+      </div>
+
+      <!-- Voice -->
+      <div class="settings-section" id="section-voice">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Text-to-Speech</div>
+            <div class="settings-row-desc">Read AI responses aloud.</div>
+          </div>
+          <label class="settings-toggle"><input id="cfg-tts-enabled" type="checkbox"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="mb-4 mt-3">
+          <p class="settings-label">Voice</p>
+          <select id="cfg-tts-voice" class="settings-select">
+            <option value="en-US-AriaNeural">Aria (US, Female)</option>
+            <option value="en-US-GuyNeural">Guy (US, Male)</option>
+            <option value="en-GB-SoniaNeural">Sonia (UK, Female)</option>
+            <option value="en-GB-RyanNeural">Ryan (UK, Male)</option>
+            <option value="en-AU-NatashaNeural">Natasha (AU, Female)</option>
+            <option value="en-AU-WilliamNeural">William (AU, Male)</option>
+          </select>
+        </div>
+        <div class="mb-4">
+          <p class="settings-label">Show Thinking Panel</p>
+          <div class="settings-row mt-1">
+            <div class="settings-row-desc">Display DeepSeek / Qwen reasoning steps.</div>
+            <label class="settings-toggle"><input id="cfg-show-thinking" type="checkbox"><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Memory -->
+      <div class="settings-section" id="section-memory">
+        <div class="settings-row mb-4">
+          <div>
+            <div class="settings-row-label">Auto-Memory</div>
+            <div class="settings-row-desc">bud automatically saves facts it learns about you across sessions.</div>
+          </div>
+          <label class="settings-toggle"><input id="cfg-auto-memory" type="checkbox"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="mb-4">
+          <p class="settings-label">Max Tool Iterations</p>
+          <input id="cfg-max-iterations" class="settings-input" type="number" min="5" max="500" />
+          <p class="text-xs text-faint mt-1.5">Max tool calls per response. Default 100. Higher = longer autonomous runs.</p>
+        </div>
+      </div>
+
+      <!-- Groq -->
+      <div class="settings-section" id="section-groq">
+        <div class="settings-row mb-5">
+          <div>
+            <div class="settings-row-label">Enable Groq (⚡ Ultra-Fast)</div>
+            <div class="settings-row-desc">500+ tokens/sec via Groq cloud. Free tier available.</div>
+          </div>
+          <label class="settings-toggle"><input id="cfg-groq-enabled" type="checkbox"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="mb-4">
+          <p class="settings-label">Groq API Key</p>
+          <input id="cfg-groq-key" class="settings-input" type="password" placeholder="gsk_…" autocomplete="off"/>
+          <p class="text-xs text-faint mt-1.5">Get a free key at <span class="text-gold">console.groq.com</span></p>
+        </div>
+        <div class="mb-4">
+          <p class="settings-label">Groq Model</p>
+          <select id="cfg-groq-model" class="settings-select">
+            <option value="llama-3.3-70b-versatile">Llama 3.3 70B (best quality)</option>
+            <option value="llama-3.1-8b-instant">Llama 3.1 8B (fastest)</option>
+            <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+            <option value="gemma2-9b-it">Gemma 2 9B</option>
+          </select>
+        </div>
+        <div class="rounded-lg p-3 text-xs" style="background:#0a1a2a;border:1px solid #1a3a5a;color:#60a5fa;">
+          ⚡ <strong>Priority order:</strong> Groq → Ollama → OpenRouter. When Groq is enabled it runs first.
+        </div>
+      </div>
+
+      <!-- Analytics -->
+      <div class="settings-section" id="section-analytics">
+        <div id="analytics-loading" class="text-center py-8 text-faint text-sm">Loading analytics…</div>
+        <div id="analytics-content" style="display:none;">
+          <div class="grid grid-cols-2 gap-3 mb-5">
+            <div class="rounded-lg p-3 text-center" style="background:#0e0c0a;border:1px solid #2a2520;">
+              <div id="stat-sessions" class="text-2xl font-serif text-gold">–</div>
+              <div class="text-xs text-faint mt-1">Conversations</div>
+            </div>
+            <div class="rounded-lg p-3 text-center" style="background:#0e0c0a;border:1px solid #2a2520;">
+              <div id="stat-tokens" class="text-2xl font-serif text-gold">–</div>
+              <div class="text-xs text-faint mt-1">Total Tokens</div>
+            </div>
+          </div>
+          <div class="mb-5">
+            <p class="settings-label mb-2">Top Tools Used</p>
+            <div id="analytics-tools" class="space-y-1.5"></div>
+          </div>
+          <div class="mb-5">
+            <p class="settings-label mb-2">Model Usage</p>
+            <div id="analytics-models" class="space-y-1.5"></div>
+          </div>
+          <div>
+            <p class="settings-label mb-2">Daily Activity (last 14 days)</p>
+            <div id="analytics-daily" class="flex items-end gap-1" style="height:60px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Appearance -->
+      <div class="settings-section" id="section-appear">
+        <div class="mb-5">
+          <p class="settings-label">Theme</p>
+          <div class="grid grid-cols-2 gap-2 mt-2" id="theme-grid">
+            <div class="theme-swatch" data-theme="old_money" onclick="selectTheme('old_money')"
+                 style="background:#0e0c0a;border:2px solid #c8a45e;border-radius:8px;padding:.75rem;cursor:pointer;">
+              <div style="height:8px;background:#c8a45e;border-radius:3px;margin-bottom:4px;"></div>
+              <div style="height:4px;background:#352f28;border-radius:3px;margin-bottom:2px;"></div>
+              <div style="height:4px;background:#2a2520;border-radius:3px;width:70%;"></div>
+              <p class="text-xs text-center mt-2" style="color:#c8a45e;">Old Money</p>
+            </div>
+            <div class="theme-swatch" data-theme="dark_minimal" onclick="selectTheme('dark_minimal')"
+                 style="background:#0d0d0d;border:2px solid #333;border-radius:8px;padding:.75rem;cursor:pointer;">
+              <div style="height:8px;background:#4a9eff;border-radius:3px;margin-bottom:4px;"></div>
+              <div style="height:4px;background:#222;border-radius:3px;margin-bottom:2px;"></div>
+              <div style="height:4px;background:#1a1a1a;border-radius:3px;width:70%;"></div>
+              <p class="text-xs text-center mt-2" style="color:#4a9eff;">Dark Minimal</p>
+            </div>
+            <div class="theme-swatch" data-theme="hacker" onclick="selectTheme('hacker')"
+                 style="background:#000;border:2px solid #1a1a1a;border-radius:8px;padding:.75rem;cursor:pointer;">
+              <div style="height:8px;background:#00ff41;border-radius:3px;margin-bottom:4px;"></div>
+              <div style="height:4px;background:#001a00;border-radius:3px;margin-bottom:2px;"></div>
+              <div style="height:4px;background:#002200;border-radius:3px;width:70%;"></div>
+              <p class="text-xs text-center mt-2" style="color:#00ff41;">Hacker</p>
+            </div>
+            <div class="theme-swatch" data-theme="light" onclick="selectTheme('light')"
+                 style="background:#fafaf9;border:2px solid #e5e5e5;border-radius:8px;padding:.75rem;cursor:pointer;">
+              <div style="height:8px;background:#8b5cf6;border-radius:3px;margin-bottom:4px;"></div>
+              <div style="height:4px;background:#e5e5e5;border-radius:3px;margin-bottom:2px;"></div>
+              <div style="height:4px;background:#f0f0f0;border-radius:3px;width:70%;"></div>
+              <p class="text-xs text-center mt-2" style="color:#8b5cf6;">Light</p>
+            </div>
+          </div>
+        </div>
+        <div class="rounded-lg p-3 text-xs text-faint" style="background:#0e0c0a;border:1px solid #2a2520;">
+          Theme changes apply immediately on save.
+        </div>
+      </div>
+
+      <!-- Personas -->
+      <div class="settings-section" id="section-personas">
+        <div id="personas-list" class="space-y-2 mb-5"></div>
+        <div class="rounded-lg p-4" style="background:#0e0c0a;border:1px solid #2a2520;">
+          <p class="settings-label mb-3">New Persona</p>
+          <div class="mb-2">
+            <p class="text-xs text-faint mb-1">Name</p>
+            <input id="new-persona-name" class="settings-input" placeholder="e.g. Code Reviewer" />
+          </div>
+          <div class="mb-2">
+            <p class="text-xs text-faint mb-1">Description</p>
+            <input id="new-persona-desc" class="settings-input" placeholder="Brief description" />
+          </div>
+          <div class="mb-3">
+            <p class="text-xs text-faint mb-1">System Prompt</p>
+            <textarea id="new-persona-prompt" class="settings-input" rows="4" placeholder="You are a…" style="min-height:80px;max-height:200px;resize:vertical;"></textarea>
+          </div>
+          <button onclick="saveNewPersona()" class="settings-save-btn" style="margin-top:0;">Save Persona</button>
+        </div>
+      </div>
+
+      <!-- Memory Browser -->
+      <div class="settings-section" id="section-memorybrowser">
+        <div class="flex items-center gap-3 mb-4">
+          <input id="memory-search" class="settings-input flex-1" placeholder="Filter memories…" oninput="filterMemories()" />
+          <span id="memory-count" class="text-xs text-faint font-mono whitespace-nowrap">0 facts</span>
+        </div>
+        <div id="memory-list" class="space-y-1.5"></div>
+      </div>
+
+      <!-- Commands -->
+      <div class="settings-section" id="section-commands">
+        <div id="commands-list" class="space-y-2 mb-5"></div>
+        <div class="rounded-lg p-4" style="background:#0e0c0a;border:1px solid #2a2520;">
+          <p class="settings-label mb-3">New Command</p>
+          <div class="mb-2">
+            <p class="text-xs text-faint mb-1">Trigger (e.g. /review)</p>
+            <input id="new-cmd-trigger" class="settings-input" placeholder="/mycommand" />
+          </div>
+          <div class="mb-2">
+            <p class="text-xs text-faint mb-1">Title</p>
+            <input id="new-cmd-title" class="settings-input" placeholder="Display title" />
+          </div>
+          <div class="mb-3">
+            <p class="text-xs text-faint mb-1">Prompt Text</p>
+            <textarea id="new-cmd-prompt" class="settings-input" rows="3" placeholder="The prompt text…" style="min-height:60px;max-height:160px;resize:vertical;"></textarea>
+          </div>
+          <button onclick="saveNewCommand()" class="settings-save-btn" style="margin-top:0;">Save Command</button>
+        </div>
+      </div>
+
+      <!-- Save -->
+      <div class="mt-6 pt-5" style="border-top:1px solid #2a2520;">
+        <button onclick="saveSettings()" class="settings-save-btn">Save Settings</button>
+        <p id="settings-saved-msg" class="text-xs text-center mt-2" style="color:#4caf7d;display:none;">✓ Settings saved</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SEARCH OVERLAY ═════════════════════════════════════════════════════════ -->
+<div id="search-overlay" onclick="closeSearchIfOutside(event)">
+  <div class="search-box">
+    <div class="search-input-wrap">
+      <svg class="w-4 h-4 flex-shrink-0" style="color:#5a5045;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input id="search-input" class="search-input" placeholder="Search conversations…" oninput="onSearchInput()" />
+      <span class="text-xs text-faint font-mono">Esc to close</span>
+    </div>
+    <div id="search-results" class="search-results">
+      <div class="search-empty">Type to search conversations</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SIDEBAR ════════════════════════════════════════════════════════════════ -->
+<aside id="main-sidebar" class="w-64 flex-shrink-0 flex flex-col border-r border-border" style="background:#131110;">
+
+  <!-- Logo -->
+  <div class="px-5 pt-5 pb-3 flex items-center gap-3">
+    <img src="/static/logo.svg" alt="bud logo" class="w-9 h-9 flex-shrink-0" style="border-radius:50%;"/>
+    <div>
+      <h1 class="font-serif text-xl text-cream tracking-wide leading-tight">bud</h1>
+      <p class="text-xs text-faint">Personal AI Agent</p>
+    </div>
+  </div>
+
+  <div class="gold-line mx-4 mb-3"></div>
+
+  <!-- New Chat + Search -->
+  <div class="px-3 mb-2 flex gap-1.5">
+    <button onclick="newSession()"
+      class="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-md border border-borderl text-sm text-cream hover:border-gold hover:text-gold transition-colors">
+      <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+      </svg>
+      New Chat
+    </button>
+    <button onclick="openSearch()" title="Search (Ctrl+K)"
+      class="px-2.5 py-2.5 rounded-md border border-borderl text-faint hover:text-muted hover:border-borderl transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="M21 21l-4.35-4.35"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Session List -->
+  <div class="px-3 mb-1">
+    <p class="text-xs text-faint uppercase tracking-widest px-1 mb-1">Conversations</p>
+  </div>
+  <div id="session-list" class="flex-1 px-1 pb-3 space-y-0.5"></div>
+
+  <!-- Bottom: status + settings + logout -->
+  <div class="px-4 py-3 border-t border-border">
+    <!-- User email -->
+    <div id="sidebar-user-row" class="flex items-center gap-2 mb-2" style="display:none!important;">
+      <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background:#201e1b;border:1px solid #2a2520;">
+        <svg class="w-3 h-3 text-faint" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+      </div>
+      <span id="sidebar-user-email" class="text-xs truncate flex-1" style="color:#5a5045;"></span>
+      <button onclick="authLogout()" title="Sign out" class="text-faint hover:text-muted transition-colors p-1 rounded flex-shrink-0">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+        </svg>
+      </button>
+    </div>
+    <div class="flex items-center justify-between">
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center gap-2">
+          <div class="w-2 h-2 rounded-full bg-gold pulse"></div>
+          <span id="sidebar-mode-label" class="text-xs text-muted">OpenRouter</span>
+        </div>
+        <div class="flex items-center gap-2" id="browser-status-row">
+          <div class="w-2 h-2 rounded-full" id="browser-status-dot" style="background:#3a3530;"></div>
+          <span id="browser-status-label" class="text-xs" style="color:#3a3530;font-size:.65rem;">Extension not installed</span>
+        </div>
+      </div>
+      <button onclick="openSettings()" title="Settings"
+        class="text-faint hover:text-muted transition-colors p-1 rounded">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</aside>
+
+<!-- ══ MAIN ════════════════════════════════════════════════════════════════════ -->
+<main class="flex-1 flex flex-col min-w-0" style="background:#0e0c0a;">
+
+  <!-- Top bar -->
+  <header class="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
+    <div class="flex items-center gap-3">
+      <h2 id="session-title" class="font-serif text-base text-cream truncate max-w-xs">New Chat</h2>
+      <div id="model-badge" class="model-badge hidden"></div>
+    </div>
+    <div class="flex items-center gap-3">
+      <!-- TTS indicator -->
+      <div id="tts-indicator">
+        <div class="speak-bar" style="height:10px;"></div>
+        <div class="speak-bar" style="height:14px;animation-delay:.15s;"></div>
+        <div class="speak-bar" style="height:8px;animation-delay:.3s;"></div>
+        <span>speaking</span>
+      </div>
+
+      <!-- Token counter -->
+      <div id="token-counter" class="token-badge hidden">0 tokens</div>
+
+      <!-- Share / collab -->
+      <button onclick="shareSession()" title="Share this session"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-faint hover:text-muted border border-transparent hover:border-borderl transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+        </svg>
+        Share
+      </button>
+
+      <!-- Export -->
+      <div class="relative" id="export-menu-wrap">
+        <button onclick="toggleExportMenu()"
+          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-faint hover:text-muted border border-transparent hover:border-borderl transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          Export
+        </button>
+        <div id="export-menu" class="hidden absolute right-0 top-8 z-50 rounded-lg border border-borderl overflow-hidden" style="background:#1a1815;min-width:130px;">
+          <button onclick="exportChat('md')"   class="w-full text-left px-3 py-2 text-xs text-muted hover:bg-panelb hover:text-cream transition-colors">Markdown (.md)</button>
+          <button onclick="exportChat('html')" class="w-full text-left px-3 py-2 text-xs text-muted hover:bg-panelb hover:text-cream transition-colors">HTML (printable)</button>
+          <button onclick="exportMarkdown()"   class="w-full text-left px-3 py-2 text-xs text-muted hover:bg-panelb hover:text-cream transition-colors">Export Markdown</button>
+        </div>
+      </div>
+
+      <!-- Canvas toggle -->
+      <button onclick="toggleCanvas()" id="canvas-toggle-btn"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-faint hover:text-muted border border-transparent hover:border-borderl transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><path stroke-linecap="round" d="M9 3v18M3 9h6"/>
+        </svg>
+        Canvas
+      </button>
+
+      <div id="status-indicator" class="flex items-center gap-2 text-xs text-faint">
+        <div id="status-dot" class="w-1.5 h-1.5 rounded-full bg-faint"></div>
+        <span id="status-text">Idle</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Chat + Activity split -->
+  <div class="flex flex-1 min-h-0">
+
+    <!-- ── Chat pane ─────────────────────────────────────────────────────── -->
+    <div class="flex flex-col flex-1 min-w-0 border-r border-border">
+
+      <!-- Messages -->
+      <div id="chat-messages" class="flex-1 px-6 py-5 space-y-5">
+        <div id="welcome" class="text-center py-10 fade-in">
+          <img src="/static/logo.svg" alt="bud" class="w-14 h-14 mx-auto mb-4 opacity-80" style="border-radius:50%;"/>
+          <div class="font-serif text-3xl text-cream mb-2">Good day.</div>
+          <p class="text-muted text-sm max-w-md mx-auto">
+            I can search the web, write and run code, browse sites, generate images, and remember things for you.
+            <br/>What shall we do?
+          </p>
+          <p class="text-xs text-faint mt-3 font-mono">Type <span class="text-gold">/</span> for prompt templates · <span class="text-gold">Ctrl+K</span> to search</p>
+        </div>
+      </div>
+
+      <!-- Input area -->
+      <div class="px-5 py-4 border-t border-border flex-shrink-0" style="background:#0e0c0a;">
+        <div id="attachments-bar" class="hidden mb-2 flex flex-wrap"></div>
+
+        <!-- Prompt templates popover -->
+        <div class="relative">
+          <div id="templates-popover">
+            <!-- populated by JS -->
+          </div>
+
+          <div id="drop-zone"
+               class="relative flex items-end gap-2 p-3 rounded-xl border border-borderl focus-within:border-goldd transition-colors"
+               style="background:#161412;"
+               ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+
+            <!-- Attach file button -->
+            <button onclick="document.getElementById('file-input').click()"
+              title="Attach file"
+              class="flex-shrink-0 p-1.5 rounded-lg text-faint hover:text-muted hover:bg-panelb transition-colors self-end mb-0.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+              </svg>
+            </button>
+            <input id="file-input" type="file" class="hidden" multiple onchange="onFileSelect(event)" />
+
+            <textarea
+              id="user-input"
+              placeholder="Message bud… (/ for templates)"
+              rows="1"
+              class="flex-1 bg-transparent text-sm text-cream placeholder-faint focus:outline-none leading-relaxed"
+              onkeydown="handleKey(event)"
+              oninput="onInputChange(event)"
+            ></textarea>
+
+            <!-- Mic button -->
+            <button id="mic-btn" onclick="toggleVoice()"
+              title="Voice input"
+              class="flex-shrink-0 p-1.5 rounded-lg text-faint hover:text-muted hover:bg-panelb transition-colors self-end mb-0.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
+              </svg>
+            </button>
+
+            <!-- Send button -->
+            <button id="send-btn" onclick="sendMessage()"
+              class="flex-shrink-0 p-2 rounded-lg bg-gold text-bg hover:bg-goldh disabled:opacity-40 disabled:cursor-not-allowed transition-colors self-end">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <p class="text-center text-xs text-faint mt-2">
+          bud runs locally — your data stays on your machine.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Canvas pane ──────────────────────────────────────────────────── -->
+    <div id="canvas-panel">
+      <div class="canvas-toolbar">
+        <span class="text-xs font-mono" style="color:#8a7e6e;margin-right:.25rem;">Canvas</span>
+        <button class="canvas-btn" onclick="copyCanvas()">Copy</button>
+        <button class="canvas-btn" onclick="clearCanvas()">Clear</button>
+        <button class="canvas-btn" onclick="downloadCanvas()">Download .md</button>
+      </div>
+      <textarea id="canvas-editor" placeholder="Canvas — send any bud message here with the → Canvas button…"></textarea>
+    </div>
+
+    <!-- ── Activity pane ───────────────────────────────────────────────── -->
+    <div id="activity-panel" class="w-96 flex-shrink-0 flex flex-col" style="background:#131110;">
+
+      <!-- Header -->
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1 rounded-md p-0.5" style="background:#0e0c0a;">
+            <span class="pane-tab active" id="tab-activity" onclick="switchPane('activity')">Activity</span>
+            <span class="pane-tab" id="tab-files"    onclick="switchPane('files')">Files</span>
+          </div>
+          <div id="live-dot" class="hidden w-1.5 h-1.5 rounded-full bg-gold pulse"></div>
+          <span id="browser-live-badge" class="hidden text-xs font-mono px-2 py-0.5 rounded-full pulse"
+                style="background:#0e2a1a;border:1px solid #1a5a2a;color:#4caf7d;">● browser live</span>
+        </div>
+        <button onclick="clearActivity()" class="text-xs text-faint hover:text-muted transition-colors">Clear</button>
+      </div>
+
+      <!-- Computer / browser view -->
+      <div id="computer-view">
+        <div class="browser-chrome">
+          <div class="browser-dots">
+            <div class="browser-dot" style="background:#c0392b;"></div>
+            <div class="browser-dot" style="background:#e67e22;"></div>
+            <div class="browser-dot" style="background:#27ae60;"></div>
+          </div>
+          <div id="browser-urlbar" class="browser-urlbar">about:blank</div>
+          <div id="browser-action" class="browser-action-label hidden"></div>
+        </div>
+        <div id="browser-frame-wrap">
+          <div id="browser-placeholder" class="w-full flex flex-col items-center justify-center text-faint" style="height:200px;background:#0a0908;">
+            <svg class="w-8 h-8 mb-2 opacity-30" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24">
+              <rect x="2" y="4" width="20" height="16" rx="2"/><path d="M8 4v16M2 9h20"/>
+            </svg>
+            <span class="text-xs opacity-40">Browser will appear here</span>
+          </div>
+          <img id="browser-live-img" src="" alt="Browser view" style="display:none;" onclick="openLightbox(this.src)" />
+          <div id="frame-loading-overlay"></div>
+        </div>
+        <div id="frame-strip" class="hidden border-t border-border" style="background:#0e0c0a;padding:.4rem .5rem;overflow-x:auto;white-space:nowrap;"></div>
+      </div>
+
+      <!-- Thinking panel -->
+      <div id="thinking-panel">
+        <div class="thinking-header" onclick="toggleThinking()">
+          <span class="text-xs think-pulse" id="think-icon" style="color:#c8a45e;">◆</span>
+          <span class="text-xs text-muted font-mono">Reasoning</span>
+          <span class="text-xs text-faint ml-auto" id="think-toggle-label">hide</span>
+        </div>
+        <div class="thinking-content" id="thinking-content"></div>
+      </div>
+
+      <!-- Activity feed -->
+      <div id="activity-feed" class="flex-1 px-3 py-3 space-y-2" style="overflow-y:auto;">
+        <p class="text-xs text-faint text-center py-6">Tool calls and screenshots will appear here.</p>
+      </div>
+
+      <!-- File tree panel -->
+      <div id="files-panel" class="hidden flex-1 flex flex-col" style="overflow:hidden;">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-border flex-shrink-0">
+          <span class="text-xs text-faint font-mono">workspace/</span>
+          <button onclick="refreshFileTree()" class="text-xs text-faint hover:text-muted transition-colors">↻ refresh</button>
+        </div>
+        <div id="file-tree" class="flex-1 px-2 py-2 overflow-y-auto">
+          <p class="text-xs text-faint text-center py-6 opacity-50">No files yet</p>
+        </div>
+        <div id="file-viewer" class="hidden border-t border-border flex-shrink-0" style="max-height:220px;">
+          <div class="flex items-center justify-between px-3 py-1.5 border-b border-border" style="background:#131110;">
+            <span id="file-viewer-name" class="text-xs font-mono text-gold truncate max-w-48"></span>
+            <button onclick="closeFileViewer()" class="text-xs text-faint hover:text-muted">✕</button>
+          </div>
+          <pre id="file-viewer-content" class="text-xs font-mono overflow-auto p-3" style="color:#c8b890;background:#0e0c0a;max-height:180px;white-space:pre-wrap;word-break:break-all;"></pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ══ JAVASCRIPT ══════════════════════════════════════════════════════════════ -->
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let ws = null;
+let currentSessionId = null;
+let sessions = [];
+let isThinking = false;
+let pendingAssistantEl = null;
+let pendingContent = '';
+let _permTool = null, _permSessionId = null;
+let _thinkingVisible = true;
+let _totalTokens = 0;
+let _appSettings = {};
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+
+// ─── Prompt templates ─────────────────────────────────────────────────────────
+const TEMPLATES = [
+  { title: '🔍 Research topic',    text: 'Research [topic] and give me a comprehensive summary with sources.' },
+  { title: '💻 Write & run code',  text: 'Write a Python script that [does X] and run it.' },
+  { title: '🌐 Browse and extract',text: 'Go to [URL] and extract all [data/text/links].' },
+  { title: '🖼️ Generate image',    text: 'Generate a realistic image of [subject, detailed description].' },
+  { title: '📄 Read & summarise',  text: 'Read the file at workspace/[filename] and summarise it.' },
+  { title: '📅 Schedule task',     text: 'Schedule a daily task at 9am to [do X].' },
+  { title: '📧 Read my emails',    text: 'Read my last 10 emails and summarise the important ones.' },
+  { title: '🎮 Build a game',      text: 'Build a playable [game type] game and open it in the browser.' },
+  { title: '📹 YouTube transcript',text: 'Get the transcript of this YouTube video: [URL]' },
+  { title: '🖥️ Desktop screenshot',text: 'Take a screenshot of my desktop and tell me what\'s open.' },
+];
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+let _currentUser = null;
+
+function authTab(tab) {
+  document.getElementById('auth-form-login').style.display    = tab === 'login'    ? '' : 'none';
+  document.getElementById('auth-form-register').style.display = tab === 'register' ? '' : 'none';
+  document.getElementById('auth-tab-login').style.borderBottomColor    = tab === 'login'    ? '#c8a45e' : 'transparent';
+  document.getElementById('auth-tab-login').style.color                = tab === 'login'    ? '#c8a45e' : '#5a5045';
+  document.getElementById('auth-tab-register').style.borderBottomColor = tab === 'register' ? '#c8a45e' : 'transparent';
+  document.getElementById('auth-tab-register').style.color             = tab === 'register' ? '#c8a45e' : '#5a5045';
+}
+
+async function authLogin() {
+  const email    = document.getElementById('auth-login-email').value.trim();
+  const password = document.getElementById('auth-login-password').value;
+  const errEl    = document.getElementById('auth-login-error');
+  errEl.style.display = 'none';
+  if (!email || !password) { errEl.textContent = 'Email and password required.'; errEl.style.display = ''; return; }
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Login failed.'; errEl.style.display = ''; return; }
+    _currentUser = data.user;
+    onAuthSuccess();
+  } catch(e) { errEl.textContent = 'Network error.'; errEl.style.display = ''; }
+}
+
+async function authRegister() {
+  const name     = document.getElementById('auth-reg-name').value.trim();
+  const email    = document.getElementById('auth-reg-email').value.trim();
+  const password = document.getElementById('auth-reg-password').value;
+  const errEl    = document.getElementById('auth-reg-error');
+  errEl.style.display = 'none';
+  if (!email || !password) { errEl.textContent = 'Email and password required.'; errEl.style.display = ''; return; }
+  if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = ''; return; }
+  try {
+    const res = await fetch('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, name }),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Registration failed.'; errEl.style.display = ''; return; }
+    _currentUser = data.user;
+    onAuthSuccess();
+  } catch(e) { errEl.textContent = 'Network error.'; errEl.style.display = ''; }
+}
+
+async function authLogout() {
+  await fetch('/auth/logout', { method: 'POST' });
+  _currentUser = null;
+  location.reload();
+}
+
+function onAuthSuccess() {
+  // Hide overlay
+  document.getElementById('auth-overlay').style.display = 'none';
+  // Show user row in sidebar
+  const row = document.getElementById('sidebar-user-row');
+  row.style.cssText = ''; // remove the display:none!important
+  row.style.display = 'flex';
+  document.getElementById('sidebar-user-email').textContent = _currentUser.email;
+  // Boot the app
+  loadAppSettings();
+  connectWS();
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+(async function checkAuth() {
+  try {
+    const res = await fetch('/auth/me');
+    if (res.ok) {
+      _currentUser = await res.json();
+      onAuthSuccess();
+    } else {
+      // Show auth overlay — check if this is a fresh install (no users yet)
+      const countRes = await fetch('/auth/usercount').catch(() => null);
+      if (countRes && countRes.ok) {
+        const { count } = await countRes.json();
+        if (count === 0) authTab('register'); // default to signup on fresh install
+      }
+    }
+  } catch(e) {
+    // Server unreachable — still show overlay
+    console.warn('Auth check failed:', e);
+  }
+})();
+
+async function loadAppSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    _appSettings = await res.json();
+    applySettings(_appSettings);
+  } catch(e) { console.warn('Could not load settings:', e); }
+}
+
+function applySettings(cfg) {
+  _appSettings = cfg;
+  const modeLabel = document.getElementById('sidebar-mode-label');
+  if (cfg.groq_enabled) {
+    modeLabel.textContent = 'Groq';
+    modeLabel.style.color = '#f97316';
+  } else if (cfg.ollama_enabled) {
+    modeLabel.textContent = 'Ollama (offline)';
+    modeLabel.style.color = '#4caf7d';
+  } else {
+    modeLabel.textContent = 'OpenRouter';
+    modeLabel.style.color = '';
+  }
+  // Update input placeholder with user's name
+  const input = document.getElementById('user-input');
+  if (input && cfg.user_name && cfg.user_name !== 'Friend') {
+    input.placeholder = `Message bud, ${cfg.user_name}… (/ for templates)`;
+  }
+  // Apply saved theme
+  if (cfg.theme) applyTheme(cfg.theme);
+}
+
+// ─── WebSocket ────────────────────────────────────────────────────────────────
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen  = () => {
+    ws.send(JSON.stringify({ type: 'list_sessions' }));
+    // Restore last open session after refresh
+    const lastId = localStorage.getItem('bud_last_session');
+    if (lastId) {
+      setTimeout(() => {
+        currentSessionId = lastId;
+        ws.send(JSON.stringify({ type: 'load_session', session_id: lastId }));
+      }, 150);
+    }
+  };
+  ws.onmessage = (e) => handleEvent(JSON.parse(e.data));
+  ws.onclose = () => { setStatus('Reconnecting…', false); setTimeout(connectWS, 2000); };
+  ws.onerror = () => ws.close();
+}
+
+// ─── Event router ─────────────────────────────────────────────────────────────
+function handleEvent(ev) {
+  if (ev.type === 'sessions')         { renderSessions(ev.sessions); return; }
+  if (ev.type === 'session_created')  { onSessionCreated(ev.session); return; }
+  if (ev.type === 'history')          { renderHistory(ev.messages, ev.sessions); return; }
+  if (ev.type === 'permission_request') { showPermissionModal(ev.session_id, ev.tool, ev.description); return; }
+  if (ev.type === 'scheduled_task_done') {
+    ws.send(JSON.stringify({ type: 'list_sessions' }));
+    browserNotify('bud — Task Done', ev.task || 'Scheduled task completed');
+    return;
+  }
+
+  if (ev.session_id && ev.session_id !== currentSessionId) return;
+
+  switch (ev.type) {
+    case 'status':          setStatus(ev.content, true); break;
+    case 'model_info':      showModelBadge(ev.model); break;
+    case 'thinking':        /* handled by inline thinking block below */ break;
+    case 'token':           appendToken(ev.content); break;
+    case 'token_usage':     updateTokenCounter(ev.total); break;
+    case 'message_complete':finalizeMessage(ev.token_usage); break;
+    case 'tool_start':      renderToolStart(ev.tool, ev.args); break;
+    case 'tool_result':     renderToolResult(ev.tool, ev.output, ev.image_path, ev.status, ev.app_url); break;
+    case 'browser_frame':    renderBrowserFrame(ev.url, ev.action, ev.image_path); break;
+    case 'tts_speak':        ttsSpeak(ev.text); break;
+    case 'extension_status': updateExtensionStatus(ev.connected); break;
+    case 'error':            renderError(ev.content); break;
+  }
+}
+
+// ─── Sessions ─────────────────────────────────────────────────────────────────
+function renderSessions(list) {
+  sessions = list;
+  const el = document.getElementById('session-list');
+  el.innerHTML = '';
+  list.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'session-item px-3 py-2.5 rounded-md' + (s.id === currentSessionId ? ' active' : '');
+    div.dataset.id = s.id;
+    div.innerHTML = `
+      <div class="flex items-start justify-between gap-1">
+        <p class="text-xs text-cream truncate leading-snug flex-1">${escHtml(s.title)}</p>
+        <button class="text-faint hover:text-red-400 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100 ml-1"
+          style="font-size:.65rem;" onclick="deleteSession('${s.id}',event)" title="Delete">✕</button>
+      </div>
+      <p class="text-xs text-faint mt-0.5">${relativeTime(s.updated_at)}</p>`;
+    div.classList.add('group');
+    div.onclick = () => loadSession(s.id);
+    el.appendChild(div);
+  });
+}
+
+async function deleteSession(id, e) {
+  e.stopPropagation();
+  if (!confirm('Delete this conversation?')) return;
+  await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+  if (currentSessionId === id) { currentSessionId = null; clearChat(); clearActivity(); }
+  ws.send(JSON.stringify({ type: 'list_sessions' }));
+}
+
+function onSessionCreated(session) {
+  currentSessionId = session.id;
+  localStorage.setItem('bud_last_session', session.id);
+  document.getElementById('session-title').textContent = session.title;
+  clearChat();
+  clearActivity();
+  document.getElementById('welcome').style.display = '';
+  resetTokenCounter();
+  ws.send(JSON.stringify({ type: 'list_sessions' }));
+  setStatus('Idle', false);
+}
+
+function newSession() { ws.send(JSON.stringify({ type: 'new_session' })); }
+
+function loadSession(id) {
+  currentSessionId = id;
+  localStorage.setItem('bud_last_session', id);
+  Object.keys(_codeAttempts).forEach(k => { if (k.startsWith(id + ':')) delete _codeAttempts[k]; });
+  clearChat(); clearActivity(); resetTokenCounter();
+  ws.send(JSON.stringify({ type: 'load_session', session_id: id }));
+}
+
+function renderHistory(messages, sessionList) {
+  if (sessionList) renderSessions(sessionList);
+  clearChat();
+  const welcome = document.getElementById('welcome');
+  if (messages.length === 0) { welcome.style.display = ''; return; }
+  welcome.style.display = 'none';
+  const session = sessions.find(s => s.id === currentSessionId);
+  if (session) document.getElementById('session-title').textContent = session.title;
+  messages.forEach(m => {
+    if (m.role === 'user') appendUserMessage(m.content || '');
+    else if (m.role === 'assistant' && m.content) appendAssistantMessage(m.content);
+  });
+  scrollChat();
+}
+
+// ─── Chat rendering ───────────────────────────────────────────────────────────
+function clearChat() {
+  const el = document.getElementById('chat-messages');
+  el.innerHTML = `<div id="welcome" class="text-center py-10 fade-in" style="display:none">
+    <img src="/static/logo.svg" alt="bud" class="w-14 h-14 mx-auto mb-4 opacity-80" style="border-radius:50%;"/>
+    <div class="font-serif text-3xl text-cream mb-2">Good day.</div>
+    <p class="text-muted text-sm">What shall we do?</p>
+  </div>`;
+  pendingAssistantEl = null; pendingContent = '';
+}
+
+function appendUserMessage(text) {
+  document.getElementById('welcome').style.display = 'none';
+  const el = document.createElement('div');
+  el.className = 'flex justify-end fade-in';
+  el.innerHTML = `<div class="max-w-lg px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed text-cream" style="background:#1e1b17;border:1px solid #2a2520;">${escHtml(text).replace(/\n/g,'<br/>')}</div>`;
+  document.getElementById('chat-messages').appendChild(el);
+  scrollChat();
+}
+
+function appendAssistantMessage(md) {
+  document.getElementById('welcome').style.display = 'none';
+  const el = document.createElement('div');
+  el.className = 'flex gap-3 fade-in';
+  const id = 'msg-' + Date.now();
+  el.innerHTML = `
+    <div class="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5 overflow-hidden" style="border:1px solid #2a2520;">
+      <img src="/static/logo.svg" alt="bud" class="w-full h-full"/>
+    </div>
+    <div class="flex-1 prose text-sm text-cream max-w-2xl" id="${id}">${renderMarkdown(md)}</div>`;
+  document.getElementById('chat-messages').appendChild(el);
+  scrollChat();
+  return document.getElementById(id);
+}
+
+function appendToken(token) {
+  if (!pendingAssistantEl) {
+    pendingContent = '';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'flex gap-3 fade-in';
+    const id = 'streaming-' + Date.now();
+    wrapper.innerHTML = `
+      <div class="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5 overflow-hidden" style="border:1px solid #2a2520;">
+        <img src="/static/logo.svg" alt="bud" class="w-full h-full"/>
+      </div>
+      <div class="flex-1 prose text-sm text-cream max-w-2xl" id="${id}"></div>`;
+    document.getElementById('chat-messages').appendChild(wrapper);
+    pendingAssistantEl = document.getElementById(id);
+    document.getElementById('welcome').style.display = 'none';
+  }
+  pendingContent += token;
+  pendingAssistantEl.innerHTML = renderMarkdown(pendingContent) + '<span class="blink text-gold">▋</span>';
+  scrollChat();
+}
+
+function finalizeMessage(tokenUsage) {
+  if (pendingAssistantEl) {
+    pendingAssistantEl.innerHTML = renderMarkdown(pendingContent);
+    // Check for HTML artifacts
+    if (/<(!DOCTYPE html|html[\s>])/i.test(pendingContent)) {
+      addArtifactButton(pendingAssistantEl, pendingContent);
+    }
+    pendingAssistantEl = null;
+    pendingContent = '';
+  }
+  setStatus('Idle', false);
+  isThinking = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('user-input').disabled = false;
+  document.getElementById('live-dot').classList.add('hidden');
+  document.getElementById('browser-action').classList.add('hidden');
+  document.getElementById('think-icon').classList.remove('think-pulse');
+  if (tokenUsage) updateTokenCounter(tokenUsage.total);
+  ws.send(JSON.stringify({ type: 'list_sessions' }));
+  scrollChat();
+  if (document.hidden) browserNotify('bud', 'Response ready — click to view');
+}
+
+function addArtifactButton(el, html) {
+  const btn = document.createElement('button');
+  btn.className = 'mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors';
+  btn.style.cssText = 'background:#1a2a1a;border:1px solid #2a5a2a;color:#4caf7d;';
+  btn.innerHTML = '🚀 Open Live Preview';
+  btn.onclick = () => {
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  };
+  el.parentElement.appendChild(btn);
+}
+
+function scrollChat() {
+  const el = document.getElementById('chat-messages');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ─── Token counter ────────────────────────────────────────────────────────────
+function updateTokenCounter(total) {
+  if (!total) return;
+  _totalTokens = total;
+  const el = document.getElementById('token-counter');
+  el.classList.remove('hidden');
+  el.textContent = total > 999 ? (total/1000).toFixed(1) + 'K tokens' : total + ' tokens';
+}
+
+function resetTokenCounter() {
+  _totalTokens = 0;
+  const el = document.getElementById('token-counter');
+  el.classList.add('hidden');
+  el.textContent = '0 tokens';
+}
+
+// ─── Sending ──────────────────────────────────────────────────────────────────
+function sendMessage() {
+  const input = document.getElementById('user-input');
+  let text = input.value.trim();
+  if (!text || isThinking) return;
+
+  // Inject attachments
+  if (_attachments.length > 0) {
+    const ctx = _attachments.map(a => {
+      const isPdf = a.filename.toLowerCase().endsWith('.pdf');
+      const isImg = (a.mime || '').startsWith('image/');
+      const tool  = isPdf ? `read_pdf("${a.path}")` : `read_system_file("${a.path}")`;
+      return isImg ? `[Image attached: ${a.filename} at ${a.path}]` : `[File attached: ${a.filename}] Use ${tool} to read its contents.`;
+    }).join('\n');
+    text = text ? `${text}\n\n${ctx}` : ctx;
+    _attachments = [];
+    document.getElementById('attachments-bar').innerHTML = '';
+    document.getElementById('attachments-bar').classList.add('hidden');
+  }
+
+  if (!currentSessionId) {
+    ws.send(JSON.stringify({ type: 'new_session' }));
+    setTimeout(() => { document.getElementById('user-input').value = text; sendMessage(); }, 400);
+    return;
+  }
+
+  input.value = '';
+  closeTemplates();
+  appendUserMessage(text);
+  isThinking = true;
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('user-input').disabled = true;
+  setStatus('Thinking…', true);
+  ws.send(JSON.stringify({ type: 'message', session_id: currentSessionId, content: text }));
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  if (e.key === 'Escape') closeTemplates();
+  if (e.key === 'ArrowDown' && document.getElementById('templates-popover').classList.contains('show')) {
+    e.preventDefault();
+    const items = document.querySelectorAll('.template-item');
+    if (items.length) items[0].focus();
+  }
+}
+
+function onInputChange(e) {
+  const val = e.target.value;
+  if (val === '/' || val.startsWith('/') && val.length <= 2) {
+    openTemplates(val.slice(1));
+  } else {
+    closeTemplates();
+  }
+}
+
+// ─── Prompt templates ─────────────────────────────────────────────────────────
+function openTemplates(filter) {
+  const pop = document.getElementById('templates-popover');
+  const filtered = filter ? TEMPLATES.filter(t => t.title.toLowerCase().includes(filter.toLowerCase()) || t.text.toLowerCase().includes(filter.toLowerCase())) : TEMPLATES;
+  if (!filtered.length) { closeTemplates(); return; }
+  pop.innerHTML = filtered.map((t, i) => `
+    <div class="template-item" tabindex="0" onclick="applyTemplate('${escHtml(t.text.replace(/'/g,"\\'"))}')" onkeydown="templateKey(event,'${escHtml(t.text.replace(/'/g,"\\'"))}')">
+      <div class="template-title">${escHtml(t.title)}</div>
+      <div class="template-preview">${escHtml(t.text)}</div>
+    </div>`).join('');
+  pop.classList.add('show');
+}
+
+function closeTemplates() {
+  document.getElementById('templates-popover').classList.remove('show');
+}
+
+function applyTemplate(text) {
+  const input = document.getElementById('user-input');
+  input.value = text;
+  input.focus();
+  // Position cursor at first [bracket]
+  const idx = text.indexOf('[');
+  if (idx >= 0) { input.setSelectionRange(idx, text.indexOf(']') + 1); }
+  closeTemplates();
+}
+
+function templateKey(e, text) {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyTemplate(text); }
+}
+
+// ─── Browser / computer view ──────────────────────────────────────────────────
+let frameHistory = [];
+
+function renderBrowserFrame(url, action, image_path) {
+  const view = document.getElementById('computer-view');
+  view.classList.add('active');
+  document.getElementById('live-dot').classList.remove('hidden');
+  // Auto-open activity panel so user can watch
+  switchPane('activity');
+  if (window.innerWidth <= 768) mobileNav('activity');
+  if (url) document.getElementById('browser-urlbar').textContent = url;
+  const actionEl = document.getElementById('browser-action');
+  if (action) { actionEl.classList.remove('hidden'); actionEl.textContent = action; actionEl.classList.add('typing-cursor'); }
+  if (image_path) {
+    const overlay = document.getElementById('frame-loading-overlay');
+    overlay.classList.add('show');
+    document.getElementById('browser-placeholder').style.display = 'none';
+    const liveImg = document.getElementById('browser-live-img');
+    liveImg.style.display = 'block';
+    const newSrc = image_path + '?t=' + Date.now();
+    const tmp = new Image();
+    tmp.onload = () => { liveImg.src = newSrc; overlay.classList.remove('show'); actionEl.classList.remove('typing-cursor'); };
+    tmp.src = newSrc;
+    const strip = document.getElementById('frame-strip');
+    strip.classList.remove('hidden');
+    const thumb = document.createElement('img');
+    thumb.src = newSrc; thumb.title = action || url;
+    thumb.style.cssText = 'height:44px;width:auto;border-radius:3px;border:1px solid #2a2520;cursor:zoom-in;margin-right:4px;display:inline-block;vertical-align:top;opacity:.7;transition:opacity .15s;';
+    thumb.onmouseover = () => thumb.style.opacity = '1';
+    thumb.onmouseleave = () => thumb.style.opacity = '.7';
+    thumb.onclick = () => openLightbox(image_path);
+    strip.appendChild(thumb);
+    strip.scrollLeft = strip.scrollWidth;
+  }
+}
+
+function resetComputerView() {
+  document.getElementById('computer-view').classList.remove('active');
+  document.getElementById('browser-urlbar').textContent = 'about:blank';
+  document.getElementById('browser-action').classList.add('hidden');
+  const img = document.getElementById('browser-live-img');
+  img.style.display = 'none'; img.src = '';
+  document.getElementById('browser-placeholder').style.display = 'flex';
+  document.getElementById('frame-strip').innerHTML = '';
+  document.getElementById('frame-strip').classList.add('hidden');
+  document.getElementById('live-dot').classList.add('hidden');
+  document.getElementById('frame-loading-overlay').classList.remove('show');
+  frameHistory = [];
+}
+
+// ─── Activity pane ────────────────────────────────────────────────────────────
+function clearActivity() {
+  const el = document.getElementById('activity-feed');
+  el.innerHTML = '<p class="text-xs text-faint text-center py-6">Tool calls and screenshots will appear here.</p>';
+  resetComputerView();
+  hideThinkingPanel();
+}
+
+const _codeAttempts = {};
+const _SILENT_TOOLS = new Set(['browser_screenshot', 'browser_wait', 'browser_scroll', 'browser_read_page']);
+
+function renderToolStart(tool, args) {
+  if (_SILENT_TOOLS.has(tool)) {
+    const actionEl = document.getElementById('browser-action');
+    actionEl.classList.remove('hidden');
+    actionEl.textContent = toolIcon(tool) + ' ' + tool.replace('browser_','');
+    return null;
+  }
+  if (tool.startsWith('browser_')) document.getElementById('browser-live-badge').classList.remove('hidden');
+
+  const feed = document.getElementById('activity-feed');
+  feed.querySelector('.text-center')?.remove();
+
+  const id = `tool-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+  const icon = toolIcon(tool);
+  let argsSummary = '';
+  if (tool === 'run_code') {
+    const lang = args.language || '?', lines = (args.code || '').split('\n').length;
+    argsSummary = `<span class="attempt-pill ml-1">${lang} · ${lines} line${lines!==1?'s':''}</span>`;
+    const key = currentSessionId + ':' + tool;
+    _codeAttempts[key] = (_codeAttempts[key] || 0) + 1;
+    if (_codeAttempts[key] > 1) argsSummary += `<span class="attempt-pill ml-1" style="color:#c8a45e;">attempt ${_codeAttempts[key]}</span>`;
+  } else if (tool === 'web_search') {
+    argsSummary = `<span class="text-xs text-muted truncate max-w-32">${escHtml((args.query||'').slice(0,32))}</span>`;
+  } else if (tool === 'browse') {
+    argsSummary = `<span class="text-xs text-muted truncate max-w-32">${escHtml((args.url||'').replace('https://','').slice(0,32))}</span>`;
+  }
+  const argsStr = JSON.stringify(args, null, 2);
+  const card = document.createElement('div');
+  card.className = 'tool-card fade-in'; card.id = id;
+  card.innerHTML = `
+    <div class="tool-header" onclick="toggleToolBody('${id}')">
+      <span class="text-base">${icon}</span>
+      <span class="text-xs font-mono text-gold flex-shrink-0">${escHtml(tool)}</span>
+      <span class="flex-1 flex items-center gap-1 min-w-0 ml-1">${argsSummary}</span>
+      <div class="w-2 h-2 rounded-full bg-gold pulse flex-shrink-0" id="${id}-dot"></div>
+    </div>
+    <div class="tool-body open" id="${id}-body">
+      <p class="text-xs text-faint mb-1.5">Arguments</p>
+      <pre class="text-xs font-mono text-muted overflow-x-auto whitespace-pre-wrap break-all leading-relaxed" style="max-height:100px;">${escHtml(argsStr)}</pre>
+      <div class="result-area mt-2"></div>
+    </div>`;
+  feed.appendChild(card);
+  feed.scrollTop = feed.scrollHeight;
+  return id;
+}
+
+// ─── Thinking panel ───────────────────────────────────────────────────────────
+function showThinking(content) {
+  if (!content) return;
+  const panel = document.getElementById('thinking-panel');
+  const textEl = document.getElementById('thinking-content');
+  panel.classList.add('show');
+  textEl.textContent = content;
+  textEl.scrollTop = textEl.scrollHeight;
+  document.getElementById('think-icon').classList.add('think-pulse');
+  setStatus('Reasoning…', true);
+}
+
+function toggleThinking() {
+  const textEl = document.getElementById('thinking-content');
+  const label  = document.getElementById('think-toggle-label');
+  _thinkingVisible = !_thinkingVisible;
+  textEl.style.display = _thinkingVisible ? '' : 'none';
+  label.textContent = _thinkingVisible ? 'hide' : 'show';
+}
+
+function hideThinkingPanel() {
+  document.getElementById('thinking-panel').classList.remove('show');
+  document.getElementById('thinking-content').textContent = '';
+  document.getElementById('think-icon').classList.remove('think-pulse');
+}
+
+// ─── Permission modal ─────────────────────────────────────────────────────────
+function showPermissionModal(sid, tool, description) {
+  _permSessionId = sid; _permTool = tool;
+  document.getElementById('perm-description').textContent = description || `Use tool: ${tool}`;
+  document.getElementById('perm-modal').classList.add('show');
+}
+
+function respondPermission(granted) {
+  document.getElementById('perm-modal').classList.remove('show');
+  if (_permSessionId && _permTool) {
+    ws.send(JSON.stringify({ type: 'permission_response', session_id: _permSessionId, tool: _permTool, granted }));
+  }
+  _permTool = null; _permSessionId = null;
+}
+
+// ─── Tool result ──────────────────────────────────────────────────────────────
+function renderToolResult(tool, output, image_path, status, app_url) {
+  if (_SILENT_TOOLS.has(tool)) return;
+  if (tool === 'browser_close') document.getElementById('browser-live-badge').classList.add('hidden');
+
+  const feed = document.getElementById('activity-feed');
+  const cards = [...feed.querySelectorAll('.tool-card')].reverse();
+  const card = cards.find(c => { const h = c.querySelector('.tool-header span.font-mono.text-gold'); return h && h.textContent === tool; });
+  if (!card) return;
+
+  card.querySelector('.pulse')?.classList.remove('pulse');
+  const header = card.querySelector('.tool-header');
+  const dotEl  = card.querySelector('[id$="-dot"]');
+
+  if (tool === 'run_code' && status) {
+    if (status === 'pass') {
+      card.classList.add('status-pass');
+      if (dotEl) { dotEl.style.background = '#4caf7d'; dotEl.classList.remove('pulse'); }
+      header.insertAdjacentHTML('beforeend', '<span class="badge-pass ml-auto">PASS</span>');
+      setStatus('Code ran successfully', false);
+    } else if (status === 'fail') {
+      card.classList.add('status-fail');
+      if (dotEl) { dotEl.style.background = '#e06060'; dotEl.classList.remove('pulse'); }
+      header.insertAdjacentHTML('beforeend', '<span class="badge-fail ml-auto">ERROR</span>');
+      setStatus('Error found — fixing…', true);
+    }
+  }
+
+  const resultArea = card.querySelector('.result-area');
+  if (resultArea) {
+    const cls = tool === 'run_code' ? (status === 'pass' ? 'pass' : status === 'fail' ? 'fail' : 'info') : 'info';
+    const truncated = output.slice(0,1400) + (output.length > 1400 ? '\n… (truncated)' : '');
+    let html = `<div class="code-output ${cls}">${escHtml(truncated)}</div>`;
+    if (image_path) html += `<img src="${image_path}?t=${Date.now()}" class="preview-img mt-2 w-full" onclick="openLightbox(this.src)" alt="Preview"/>`;
+    if (app_url) html += `<a href="${escHtml(app_url)}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono" style="background:#1a2a1a;border:1px solid #2a5a2a;color:#4caf7d;display:flex;text-decoration:none;">🚀 Open App <span class="ml-auto opacity-50 text-xs">${escHtml(app_url)}</span></a>`;
+    resultArea.innerHTML = html;
+  }
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function renderError(msg) {
+  const feed = document.getElementById('activity-feed');
+  const div  = document.createElement('div');
+  div.className = 'fade-in px-3 py-2.5 rounded-lg text-xs border';
+  div.style.cssText = 'background:#1a0e0e;border-color:#4a2020;color:#e06060;';
+  div.textContent = '⚠ ' + msg;
+  feed.appendChild(div);
+  feed.scrollTop = feed.scrollHeight;
+  setStatus('Idle', false);
+  isThinking = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('user-input').disabled = false;
+}
+
+// ─── Status / model ───────────────────────────────────────────────────────────
+function setStatus(text, active) {
+  document.getElementById('status-text').textContent = text;
+  const dot = document.getElementById('status-dot');
+  dot.style.background = active ? '#c8a45e' : '#5a5045';
+  if (active) dot.classList.add('pulse'); else dot.classList.remove('pulse');
+}
+
+function showModelBadge(model) {
+  const b = document.getElementById('model-badge');
+  const short = model.split('/').pop().replace(':free','').replace('-instruct','');
+  b.textContent = short;
+  b.classList.remove('hidden');
+}
+
+// ─── TTS ──────────────────────────────────────────────────────────────────────
+let _ttsUtterance = null;
+
+function ttsSpeak(text) {
+  if (!_appSettings.tts_enabled || !window.speechSynthesis) return;
+  if (_ttsUtterance) window.speechSynthesis.cancel();
+  // Strip markdown
+  const clean = text.replace(/[#*`_~\[\]()]/g, ' ').replace(/\s+/g,' ').trim().slice(0, 1000);
+  _ttsUtterance = new SpeechSynthesisUtterance(clean);
+  _ttsUtterance.rate  = 0.95;
+  _ttsUtterance.pitch = 1.0;
+  const indicator = document.getElementById('tts-indicator');
+  indicator.classList.add('show');
+  _ttsUtterance.onend = () => indicator.classList.remove('show');
+  _ttsUtterance.onerror = () => indicator.classList.remove('show');
+  window.speechSynthesis.speak(_ttsUtterance);
+}
+
+// ─── Settings modal ───────────────────────────────────────────────────────────
+async function openSettings() {
+  const cfg = await (await fetch('/api/settings')).json();
+  document.getElementById('cfg-user-name').value         = cfg.user_name || '';
+  document.getElementById('cfg-api-key').value           = '';  // never pre-fill key
+  document.getElementById('cfg-api-key').placeholder     = cfg.openrouter_api_key_set ? '(key saved — enter new to change)' : 'sk-or-v1-…';
+  document.getElementById('cfg-preferred-model').value   = cfg.preferred_model || 'auto';
+  document.getElementById('cfg-max-tokens').value        = cfg.max_tokens || 4096;
+  document.getElementById('cfg-ollama-enabled').checked  = !!cfg.ollama_enabled;
+  document.getElementById('cfg-ollama-url').value        = cfg.ollama_url || 'http://localhost:11434';
+  document.getElementById('cfg-ollama-model').value      = cfg.ollama_model || 'llama3.2';
+  document.getElementById('cfg-tts-enabled').checked     = !!cfg.tts_enabled;
+  document.getElementById('cfg-tts-voice').value         = cfg.tts_voice || 'en-US-AriaNeural';
+  document.getElementById('cfg-show-thinking').checked   = cfg.show_thinking !== false;
+  document.getElementById('cfg-auto-memory').checked     = cfg.auto_memory !== false;
+  document.getElementById('cfg-max-iterations').value    = cfg.max_iterations || 100;
+  if (document.getElementById('cfg-theme')) document.getElementById('cfg-theme').value = cfg.theme || 'old_money';
+  toggleOllamaFields();
+  document.getElementById('settings-saved-msg').style.display = 'none';
+  document.getElementById('settings-modal').classList.add('show');
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.remove('show');
+}
+
+function closeSettingsIfOutside(e) {
+  if (e.target.id === 'settings-modal') closeSettings();
+}
+
+function switchSettingsTab(tab) {
+  document.querySelectorAll('.settings-nav-item').forEach(el => { el.classList.toggle('active', el.dataset.section === tab); });
+  document.querySelectorAll('.settings-section').forEach(el => { el.classList.toggle('active', el.id === 'section-' + tab); });
+  const titles = { profile:'Profile', ai:'AI Engine', ollama:'Ollama (Offline Mode)', voice:'Voice & Display', memory:'Memory', appear:'Appearance' };
+  document.getElementById('settings-section-title').textContent = titles[tab] || '';
+}
+
+function toggleOllamaFields() {
+  const on = document.getElementById('cfg-ollama-enabled').checked;
+  document.getElementById('ollama-fields').style.opacity = on ? '1' : '.4';
+  document.getElementById('ollama-fields').style.pointerEvents = on ? '' : 'none';
+}
+
+async function saveSettings() {
+  const updates = {
+    user_name:        document.getElementById('cfg-user-name').value.trim() || 'Friend',
+    preferred_model:  document.getElementById('cfg-preferred-model').value,
+    max_tokens:       parseInt(document.getElementById('cfg-max-tokens').value) || 4096,
+    ollama_enabled:   document.getElementById('cfg-ollama-enabled').checked,
+    ollama_url:       document.getElementById('cfg-ollama-url').value.trim(),
+    ollama_model:     document.getElementById('cfg-ollama-model').value.trim(),
+    tts_enabled:      document.getElementById('cfg-tts-enabled').checked,
+    tts_voice:        document.getElementById('cfg-tts-voice').value,
+    show_thinking:    document.getElementById('cfg-show-thinking').checked,
+    auto_memory:      document.getElementById('cfg-auto-memory').checked,
+    max_iterations:   parseInt(document.getElementById('cfg-max-iterations').value) || 100,
+    theme:            document.getElementById('cfg-theme')?.value || _appSettings.theme || 'old_money',
+  };
+  const key = document.getElementById('cfg-api-key').value.trim();
+  if (key && !key.startsWith('(')) updates.openrouter_api_key = key;
+
+  const res  = await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(updates) });
+  const data = await res.json();
+  if (data.ok) {
+    applySettings(data.settings || updates);
+    _appSettings = { ..._appSettings, ...updates };
+    const msg = document.getElementById('settings-saved-msg');
+    msg.style.display = 'block';
+    setTimeout(() => { msg.style.display = 'none'; }, 2500);
+  }
+}
+
+// ─── Search ───────────────────────────────────────────────────────────────────
+function openSearch() {
+  document.getElementById('search-overlay').classList.add('show');
+  setTimeout(() => document.getElementById('search-input').focus(), 50);
+}
+
+function closeSearch() {
+  document.getElementById('search-overlay').classList.remove('show');
+  document.getElementById('search-input').value = '';
+  document.getElementById('search-results').innerHTML = '<div class="search-empty">Type to search conversations</div>';
+}
+
+function closeSearchIfOutside(e) {
+  if (e.target.id === 'search-overlay') closeSearch();
+}
+
+function onSearchInput() {
+  const q = document.getElementById('search-input').value.trim().toLowerCase();
+  const el = document.getElementById('search-results');
+  if (!q) { el.innerHTML = '<div class="search-empty">Type to search conversations</div>'; return; }
+  const matches = sessions.filter(s => s.title.toLowerCase().includes(q));
+  if (!matches.length) { el.innerHTML = '<div class="search-empty">No conversations found</div>'; return; }
+  el.innerHTML = matches.map(s => `
+    <div class="search-result-item" onclick="loadSession('${s.id}');closeSearch();">
+      <div class="search-result-title">${escHtml(s.title)}</div>
+      <div class="search-result-meta">${relativeTime(s.updated_at)}</div>
+    </div>`).join('');
+}
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+function toggleExportMenu() { document.getElementById('export-menu').classList.toggle('hidden'); }
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('export-menu-wrap');
+  if (wrap && !wrap.contains(e.target)) document.getElementById('export-menu')?.classList.add('hidden');
+});
+
+function exportChat(format) {
+  document.getElementById('export-menu').classList.add('hidden');
+  if (!currentSessionId) return;
+  const a = document.createElement('a');
+  a.href = `/api/sessions/${currentSessionId}/export?format=${format}`;
+  a.download = `bud-chat-${currentSessionId.slice(0,8)}.${format === 'md' ? 'md' : 'html'}`;
+  a.click();
+}
+
+// ─── Pane tabs ────────────────────────────────────────────────────────────────
+function switchPane(tab) {
+  const feed = document.getElementById('activity-feed');
+  const files = document.getElementById('files-panel');
+  const thinking = document.getElementById('thinking-panel');
+  if (tab === 'activity') {
+    feed.classList.remove('hidden'); feed.style.display = '';
+    files.classList.add('hidden');
+    thinking.style.display = '';
+    document.getElementById('tab-activity').classList.add('active');
+    document.getElementById('tab-files').classList.remove('active');
+  } else {
+    feed.classList.add('hidden');
+    files.classList.remove('hidden'); files.style.display = 'flex';
+    thinking.style.display = 'none';
+    document.getElementById('tab-files').classList.add('active');
+    document.getElementById('tab-activity').classList.remove('active');
+    refreshFileTree();
+  }
+}
+
+// ─── File tree ────────────────────────────────────────────────────────────────
+async function refreshFileTree() {
+  const tree = document.getElementById('file-tree');
+  try {
+    const files = await (await fetch('/api/workspace')).json();
+    if (!files.length) { tree.innerHTML = '<p class="text-xs text-faint text-center py-6 opacity-50">No files yet</p>'; return; }
+    tree.innerHTML = '';
+    files.forEach(f => {
+      const div = document.createElement('div');
+      div.className = 'file-tree-item';
+      const sz = f.size < 1024 ? `${f.size}B` : f.size < 1048576 ? `${(f.size/1024).toFixed(1)}KB` : `${(f.size/1048576).toFixed(1)}MB`;
+      div.innerHTML = `<span style="color:#5a5045;">📄</span><span class="flex-1 truncate">${escHtml(f.path)}</span><span style="color:#3a3530;font-size:.62rem;">${sz}</span>`;
+      div.onclick = () => viewFile(f.path);
+      tree.appendChild(div);
+    });
+  } catch(e) { tree.innerHTML = '<p class="text-xs text-faint text-center py-6">Error loading files</p>'; }
+}
+
+async function viewFile(path) {
+  const viewer  = document.getElementById('file-viewer');
+  const nameEl  = document.getElementById('file-viewer-name');
+  const content = document.getElementById('file-viewer-content');
+  nameEl.textContent = path; content.textContent = 'Loading…';
+  viewer.classList.remove('hidden');
+  try {
+    const data = await (await fetch(`/api/workspace/read?path=${encodeURIComponent(path)}`)).json();
+    content.textContent = data.content || data.error || '(empty)';
+  } catch(e) { content.textContent = 'Error reading file.'; }
+}
+
+function closeFileViewer() { document.getElementById('file-viewer').classList.add('hidden'); }
+
+// ─── Voice input ──────────────────────────────────────────────────────────────
+let _mediaRecorder = null, _audioChunks = [], _isRecording = false;
+
+async function toggleVoice() {
+  const btn = document.getElementById('mic-btn');
+  if (_isRecording) {
+    _mediaRecorder?.stop(); _isRecording = false;
+    btn.classList.remove('recording');
+    setStatus('Transcribing…', true); return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    _audioChunks = [];
+    _mediaRecorder = new MediaRecorder(stream);
+    _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _audioChunks.push(e.data); };
+    _mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(_audioChunks, { type: 'audio/webm' });
+      if (blob.size < 100) { setStatus('Idle', false); return; }
+      try {
+        const form = new FormData();
+        form.append('file', blob, 'voice.webm');
+        const data = await (await fetch('/api/transcribe', { method:'POST', body:form })).json();
+        const text = data.text?.trim();
+        if (text) { document.getElementById('user-input').value = text; sendMessage(); }
+        else setStatus('Nothing heard — try again', false);
+      } catch(e) { setStatus('Transcription failed', false); }
+    };
+    _mediaRecorder.start(); _isRecording = true;
+    btn.classList.add('recording');
+    setStatus('🎤 Recording… click mic to stop', true);
+  } catch(err) {
+    if (err.name === 'NotAllowedError') alert('Microphone access denied. Click the 🔒 lock in your browser → allow microphone → refresh.');
+    else alert('Could not access microphone: ' + err.message);
+  }
+}
+
+// ─── File upload ──────────────────────────────────────────────────────────────
+let _attachments = [];
+
+function onDragOver(e) { e.preventDefault(); document.getElementById('drop-zone').style.borderColor = '#c8a45e'; }
+function onDragLeave(e) { document.getElementById('drop-zone').style.borderColor = ''; }
+async function onDrop(e) { e.preventDefault(); onDragLeave(e); for (const f of [...e.dataTransfer.files]) await uploadFile(f); }
+async function onFileSelect(e) { for (const f of [...e.target.files]) await uploadFile(f); e.target.value = ''; }
+
+async function uploadFile(file) {
+  const bar  = document.getElementById('attachments-bar');
+  const pill = document.createElement('div');
+  pill.className = 'attached-file';
+  pill.innerHTML = `<span>📎 ${escHtml(file.name)}</span><span class="text-xs opacity-50">uploading…</span>`;
+  bar.appendChild(pill); bar.classList.remove('hidden');
+  const form = new FormData(); form.append('file', file);
+  try {
+    const data = await (await fetch('/api/upload', { method:'POST', body:form })).json();
+    _attachments.push(data);
+    pill.innerHTML = `<span>📎 ${escHtml(file.name)}</span><span class="remove-file" onclick="removeAttachment('${escHtml(data.path)}',this.parentElement)">✕</span>`;
+  } catch(e) { pill.innerHTML = `<span style="color:#e06060;">✗ ${escHtml(file.name)} failed</span>`; }
+}
+
+function removeAttachment(path, el) {
+  _attachments = _attachments.filter(a => a.path !== path);
+  el.remove();
+  if (_attachments.length === 0) document.getElementById('attachments-bar').classList.add('hidden');
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+function requestNotifyPermission() {
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+}
+
+function browserNotify(title, body) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '/static/logo.svg' });
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function toggleToolBody(id) { document.querySelector(`#${id} .tool-body`)?.classList.toggle('open'); }
+
+function toolIcon(name) {
+  const icons = {
+    web_search:'🔍', browse:'🌐', run_code:'⚙️', image_generate:'🖼️', html_preview:'🎨',
+    remember:'🧠', recall:'💭', read_file:'📄', write_file:'✏️',
+    run_terminal:'🖥️', list_directory:'📁', read_system_file:'📂', write_system_file:'💾',
+    download_video:'📥', serve_html_app:'🚀',
+    browser_navigate:'🌍', browser_screenshot:'📸', browser_click:'👆',
+    browser_type:'⌨️', browser_press:'⌨️', browser_scroll:'↕️',
+    browser_read_page:'📖', browser_wait:'⏳', browser_close:'✖️',
+    clip_read:'📋', clip_write:'📋', youtube_transcript:'📺',
+    notify_desktop:'🔔', schedule_task:'📅', read_pdf:'📄',
+    email_read:'📧', email_send:'📤', vault_add:'🗄️', vault_search:'🔎',
+    desktop_screenshot:'🖥️', desktop_click:'👆', desktop_type:'⌨️',
+  };
+  return icons[name] || '🔧';
+}
+
+function escHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function relativeTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts.replace(' ','T') + (ts.includes('Z')?'':'Z'));
+  const sec = (Date.now() - d.getTime()) / 1000;
+  if (sec < 60) return 'just now';
+  if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+  return Math.floor(sec/86400) + 'd ago';
+}
+
+// ─── Lightbox ─────────────────────────────────────────────────────────────────
+function openLightbox(src) { document.getElementById('lightbox-img').src = src; document.getElementById('lightbox').classList.add('show'); }
+function closeLightbox() { document.getElementById('lightbox').classList.remove('show'); }
+
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+function renderMarkdown(md) {
+  if (!md) return '';
+  let html = escHtml(md);
+  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_,lang,code) => `<pre><code class="language-${lang||'text'}">${code.trimEnd()}</code></pre>`);
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g,     '<em>$1</em>');
+  html = html.replace(/^&gt; (.+)$/gm,  '<blockquote>$1</blockquote>');
+  html = html.replace(/^---$/gm,        '<hr/>');
+  html = html.replace(/^(\s*)[-*•] (.+)$/gm, '$1<li>$2</li>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  html = html.replace(/\n\n/g, '<br/><br/>');
+  html = html.replace(/\n/g, '<br/>');
+  return html;
+}
+
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeLightbox(); closeSearch(); closeSettings(); closeTemplates();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openSearch(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); newSession(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === ',') { e.preventDefault(); openSettings(); }
+});
+
+// ─── Auto-load sessions ───────────────────────────────────────────────────────
+let _firstLoad = true;
+const _origRenderSessions = renderSessions;
+renderSessions = function(list) {
+  _origRenderSessions(list);
+  if (_firstLoad) {
+    _firstLoad = false;
+    if (list.length > 0) loadSession(list[0].id);
+    else ws.send(JSON.stringify({ type: 'new_session' }));
+  }
+};
+
+// ─── Stream output (run_terminal line-by-line) ───────────────────────────────
+// Patch handleEvent to handle stream_output
+const _baseHandleEvent = handleEvent;
+handleEvent = function(ev) {
+  if (ev.session_id && ev.session_id !== currentSessionId) return;
+  if (ev.type === 'stream_output') {
+    appendStreamLine(ev.line);
+    return;
+  }
+  _baseHandleEvent(ev);
+};
+
+let _streamCard = null;
+let _streamPre  = null;
+
+function appendStreamLine(line) {
+  // Find or create a streaming output card in the activity feed
+  const feed = document.getElementById('activity-feed');
+  if (!_streamCard) {
+    _streamCard = document.createElement('div');
+    _streamCard.className = 'tool-card fade-in';
+    _streamCard.innerHTML = `
+      <div class="tool-header">
+        <span class="text-base">🖥️</span>
+        <span class="text-xs font-mono text-gold">terminal output</span>
+        <div class="w-2 h-2 rounded-full bg-gold pulse ml-auto" id="stream-dot"></div>
+      </div>
+      <div class="tool-body open">
+        <pre class="code-output info" id="stream-pre" style="max-height:240px;overflow-y:auto;"></pre>
+      </div>`;
+    feed.querySelector('.text-center')?.remove();
+    feed.appendChild(_streamCard);
+    _streamPre = _streamCard.querySelector('#stream-pre');
+  }
+  _streamPre.textContent += line;
+  _streamPre.scrollTop = _streamPre.scrollHeight;
+  feed.scrollTop = feed.scrollHeight;
+}
+
+// Reset stream card when agent finishes
+const _prevFinalize = finalizeMessage;
+finalizeMessage = function(tokenUsage) {
+  _streamCard = null;
+  _streamPre  = null;
+  _prevFinalize(tokenUsage);
+};
+
+// ─── Edge-TTS (server-side, high quality) ────────────────────────────────────
+let _audioCtx   = null;
+let _ttsEnabled = false;
+
+function ttsSpeak(text) {
+  if (!_appSettings.tts_enabled) return;
+  const voice   = _appSettings.tts_voice || 'en-US-AriaNeural';
+  const backend = _appSettings.tts_backend || 'edge-tts';
+  const clean   = text.replace(/[#*`_~\[\]()>]/g,' ').replace(/\s+/g,' ').trim().slice(0,1200);
+  if (!clean) return;
+
+  if (backend === 'edge-tts') {
+    _ttsEdge(clean, voice);
+  } else {
+    _ttsBrowser(clean);
+  }
+}
+
+async function _ttsEdge(text, voice) {
+  const indicator = document.getElementById('tts-indicator');
+  indicator.classList.add('show');
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice }),
+    });
+    if (!res.ok) { indicator.classList.remove('show'); return; }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended  = () => { indicator.classList.remove('show'); URL.revokeObjectURL(url); };
+    audio.onerror  = () => indicator.classList.remove('show');
+    audio.play();
+  } catch(e) {
+    indicator.classList.remove('show');
+    console.warn('edge-TTS failed, falling back to browser TTS', e);
+    _ttsBrowser(text);
+  }
+}
+
+function _ttsBrowser(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 0.95;
+  const indicator = document.getElementById('tts-indicator');
+  indicator.classList.add('show');
+  u.onend = u.onerror = () => indicator.classList.remove('show');
+  window.speechSynthesis.speak(u);
+}
+
+// ─── Multiple themes ──────────────────────────────────────────────────────────
+const THEMES = {
+  old_money: {
+    '--bg':'#0e0c0a','--sidebar':'#131110','--panel':'#1a1815','--panelb':'#201e1b',
+    '--border':'#2a2520','--borderl':'#352f28','--gold':'#c8a45e','--goldh':'#d4b373',
+    '--cream':'#e4d8c4','--muted':'#8a7e6e','--faint':'#5a5045','--input':'#161412',
+    '--prose-strong':'#d4b373','--prose-em':'#c8a45e','--prose-link':'#c8a45e',
+  },
+  dark_minimal: {
+    '--bg':'#0d0d0d','--sidebar':'#111','--panel':'#161616','--panelb':'#1c1c1c',
+    '--border':'#222','--borderl':'#2a2a2a','--gold':'#4a9eff','--goldh':'#6ab0ff',
+    '--cream':'#e8e8e8','--muted':'#888','--faint':'#444','--input':'#111',
+    '--prose-strong':'#6ab0ff','--prose-em':'#4a9eff','--prose-link':'#4a9eff',
+  },
+  hacker: {
+    '--bg':'#000','--sidebar':'#001100','--panel':'#001a00','--panelb':'#002200',
+    '--border':'#003300','--borderl':'#004400','--gold':'#00ff41','--goldh':'#39ff6e',
+    '--cream':'#ccffcc','--muted':'#00cc33','--faint':'#005500','--input':'#000800',
+    '--prose-strong':'#39ff6e','--prose-em':'#00ff41','--prose-link':'#00ff41',
+  },
+  light: {
+    '--bg':'#fafaf9','--sidebar':'#f5f4f2','--panel':'#efefed','--panelb':'#e8e8e5',
+    '--border':'#ddd','--borderl':'#ccc','--gold':'#7c3aed','--goldh':'#8b5cf6',
+    '--cream':'#1a1a1a','--muted':'#555','--faint':'#aaa','--input':'#fff',
+    '--prose-strong':'#7c3aed','--prose-em':'#8b5cf6','--prose-link':'#7c3aed',
+  },
+};
+
+function applyTheme(name) {
+  const theme = THEMES[name] || THEMES.old_money;
+  const root  = document.documentElement;
+  for (const [k, v] of Object.entries(theme)) {
+    root.style.setProperty(k, v);
+  }
+  // Inject a <style> that overrides Tailwind's hardcoded colors with theme values
+  let styleEl = document.getElementById('theme-override');
+  if (!styleEl) { styleEl = document.createElement('style'); styleEl.id = 'theme-override'; document.head.appendChild(styleEl); }
+  const bg = theme['--bg'], sb = theme['--sidebar'], panel = theme['--panel'],
+        panelb = theme['--panelb'], border = theme['--border'], borderl = theme['--borderl'],
+        gold = theme['--gold'], goldh = theme['--goldh'], cream = theme['--cream'],
+        muted = theme['--muted'], faint = theme['--faint'], input = theme['--input'];
+  styleEl.textContent = `
+    body, .bg-bg { background: ${bg} !important; color: ${cream} !important; }
+    aside, .bg-sidebar { background: ${sb} !important; }
+    .bg-panel { background: ${panel} !important; }
+    .bg-panelb { background: ${panelb} !important; }
+    .border-border { border-color: ${border} !important; }
+    .border-borderl { border-color: ${borderl} !important; }
+    .text-cream { color: ${cream} !important; }
+    .text-muted { color: ${muted} !important; }
+    .text-faint { color: ${faint} !important; }
+    .text-gold { color: ${gold} !important; }
+    .bg-gold { background: ${gold} !important; }
+    .hover\\:bg-goldh:hover { background: ${goldh} !important; }
+    .bg-input { background: ${input} !important; }
+    .session-item.active { border-left-color: ${gold} !important; background: ${panelb} !important; }
+    .session-item:hover { background: ${panel} !important; }
+    .tool-card { border-color: ${border} !important; }
+    .tool-header { background: ${panelb} !important; }
+    .tool-body { background: ${input} !important; }
+    .settings-box { background: ${sb} !important; }
+    .settings-sidebar { background: ${bg} !important; border-right-color: ${border} !important; }
+    .settings-nav-item.active { background: ${panel} !important; color: ${gold} !important; }
+    .settings-nav-item:hover { background: ${panel} !important; }
+    .prose strong { color: ${goldh} !important; }
+    .prose em, .prose a { color: ${gold} !important; }
+    .prose code { background: ${input} !important; border-color: ${border} !important; color: ${goldh} !important; }
+    .prose pre { background: ${input} !important; border-color: ${border} !important; }
+    #mobile-nav { background: ${sb} !important; border-top-color: ${border} !important; }
+    #mobile-nav button.active { color: ${gold} !important; }
+    ::-webkit-scrollbar-thumb { background: ${borderl} !important; }
+  `;
+  // Mark active swatch
+  document.querySelectorAll('.theme-swatch').forEach(el => {
+    const active = el.dataset.theme === name;
+    el.style.boxShadow = active ? '0 0 0 2px ' + gold : 'none';
+  });
+}
+
+function selectTheme(name) {
+  const el = document.getElementById('cfg-theme');
+  if (el) el.value = name;
+  _appSettings.theme = name;
+  applyTheme(name);
+  // persist immediately
+  fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ theme: name }) });
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  const loadEl    = document.getElementById('analytics-loading');
+  const contentEl = document.getElementById('analytics-content');
+  try {
+    const data = await (await fetch('/api/analytics')).json();
+    loadEl.style.display    = 'none';
+    contentEl.style.display = 'block';
+
+    // Stats
+    document.getElementById('stat-sessions').textContent = data.session_count ?? 0;
+    const tok = data.total_tokens || 0;
+    document.getElementById('stat-tokens').textContent = tok > 999 ? (tok/1000).toFixed(1)+'K' : tok;
+
+    // Top tools
+    const toolsEl = document.getElementById('analytics-tools');
+    if (data.top_tools?.length) {
+      const max = data.top_tools[0].count;
+      toolsEl.innerHTML = data.top_tools.map(t => `
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-mono text-faint w-36 truncate">${escHtml(t.tool)}</span>
+          <div class="flex-1 rounded-full overflow-hidden" style="background:#1a1815;height:6px;">
+            <div style="width:${Math.round(t.count/max*100)}%;height:100%;background:#c8a45e;border-radius:3px;"></div>
+          </div>
+          <span class="text-xs text-faint w-8 text-right">${t.count}</span>
+        </div>`).join('');
+    } else {
+      toolsEl.innerHTML = '<p class="text-xs text-faint">No tool calls yet.</p>';
+    }
+
+    // Models
+    const modelsEl = document.getElementById('analytics-models');
+    if (data.model_usage?.length) {
+      const maxM = data.model_usage[0].count;
+      modelsEl.innerHTML = data.model_usage.map(m => {
+        const short = (m.model||'?').split('/').pop().replace(':free','').slice(0,28);
+        return `
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-mono text-faint w-36 truncate">${escHtml(short)}</span>
+          <div class="flex-1 rounded-full overflow-hidden" style="background:#1a1815;height:6px;">
+            <div style="width:${Math.round(m.count/maxM*100)}%;height:100%;background:#8a7e6e;border-radius:3px;"></div>
+          </div>
+          <span class="text-xs text-faint w-8 text-right">${m.count}</span>
+        </div>`;
+      }).join('');
+    } else {
+      modelsEl.innerHTML = '<p class="text-xs text-faint">No LLM calls yet.</p>';
+    }
+
+    // Daily bars
+    const dailyEl = document.getElementById('analytics-daily');
+    if (data.daily_activity?.length) {
+      const maxD = Math.max(...data.daily_activity.map(d => d.count));
+      const sorted = [...data.daily_activity].reverse();
+      dailyEl.innerHTML = sorted.map(d => {
+        const h = Math.max(4, Math.round(d.count / maxD * 56));
+        return `<div title="${d.day}: ${d.count}" style="flex:1;height:${h}px;background:#c8a45e55;border-radius:2px;align-self:flex-end;" class="hover:opacity-100" onmouseover="this.style.background='#c8a45e'" onmouseout="this.style.background='#c8a45e55'"></div>`;
+      }).join('');
+    }
+  } catch(e) {
+    loadEl.textContent = 'Could not load analytics.';
+  }
+}
+
+// ─── Share session ────────────────────────────────────────────────────────────
+async function shareSession() {
+  if (!currentSessionId) { alert('Start a conversation first.'); return; }
+  try {
+    const data = await (await fetch(`/api/sessions/${currentSessionId}/share`)).json();
+    const url  = data.share_url;
+    await navigator.clipboard.writeText(url).catch(() => {});
+    alert(`Share link copied to clipboard!\n\n${url}\n\nAnyone on your network can open this URL to watch and join the conversation live.`);
+  } catch(e) {
+    alert('Could not generate share link: ' + e.message);
+  }
+}
+
+// ─── ?ask= URL param (from browser extension) ────────────────────────────────
+(function handleUrlParams() {
+  const params = new URLSearchParams(location.search);
+  const ask    = params.get('ask');
+  if (ask) {
+    // Wait for WS to connect and session to load, then pre-fill input
+    const tryFill = () => {
+      const input = document.getElementById('user-input');
+      if (input && currentSessionId) {
+        const source = params.get('source');
+        input.value  = source ? `${decodeURIComponent(ask)}\n\n(From: ${decodeURIComponent(source)})` : decodeURIComponent(ask);
+        input.focus();
+        // Auto-send after a short delay
+        setTimeout(sendMessage, 800);
+      } else {
+        setTimeout(tryFill, 300);
+      }
+    };
+    setTimeout(tryFill, 800);
+  }
+  // ?new=1 → create new session
+  if (params.get('new') === '1') {
+    setTimeout(() => ws?.send(JSON.stringify({ type: 'new_session' })), 400);
+  }
+})();
+
+// ─── Settings: Groq fields + updated titles + openSettings patch ──────────────
+const _prevSwitchTab = switchSettingsTab;
+switchSettingsTab = function(tab) {
+  const titles = {
+    profile:'Profile', ai:'AI Engine', ollama:'Ollama (Offline Mode)',
+    voice:'Voice & Display', memory:'Memory', appear:'Themes',
+    groq:'Groq — Ultra-Fast AI', analytics:'Usage Analytics',
+  };
+  document.querySelectorAll('.settings-nav-item').forEach(el => el.classList.toggle('active', el.dataset.section === tab));
+  document.querySelectorAll('.settings-section').forEach(el => el.classList.toggle('active', el.id === 'section-' + tab));
+  document.getElementById('settings-section-title').textContent = titles[tab] || '';
+};
+
+const _prevOpenSettings = openSettings;
+openSettings = async function() {
+  await _prevOpenSettings();
+  const cfg = await (await fetch('/api/settings')).json();
+  // Groq fields
+  if (document.getElementById('cfg-groq-enabled')) {
+    document.getElementById('cfg-groq-enabled').checked = !!cfg.groq_enabled;
+    document.getElementById('cfg-groq-key').value       = '';
+    document.getElementById('cfg-groq-key').placeholder = cfg.groq_api_key ? '(key saved)' : 'gsk_…';
+    document.getElementById('cfg-groq-model').value     = cfg.groq_model || 'llama-3.3-70b-versatile';
+  }
+};
+
+const _prevSaveSettings = saveSettings;
+saveSettings = async function() {
+  // Inject groq fields before saving
+  const groqKey = document.getElementById('cfg-groq-key')?.value.trim();
+  const groqEnabled = document.getElementById('cfg-groq-enabled')?.checked;
+  const groqModel   = document.getElementById('cfg-groq-model')?.value;
+
+  // Temporarily write into a hidden field pattern — we patch the save call
+  const origSave = window._groqPatch;
+  window._groqSave = { groq_enabled: groqEnabled, groq_model: groqModel };
+  if (groqKey && !groqKey.startsWith('(')) window._groqSave.groq_api_key = groqKey;
+
+  await _prevSaveSettings();
+  // Now save groq fields separately
+  if (window._groqSave) {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(window._groqSave),
+    });
+    window._groqSave = null;
+  }
+};
+
+// ─── PWA service worker registration ─────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').then(() => {
+    console.log('bud SW registered');
+  }).catch(e => console.warn('SW registration failed:', e));
+}
+
+// ─── Apply saved theme on load ────────────────────────────────────────────────
+loadAppSettings().then(() => {
+  if (_appSettings.theme) applyTheme(_appSettings.theme);
+});
+
+// Init
+requestNotifyPermission();
+
+// ─── Browser extension status (driven by WS events) ──────────────────────────
+let _extensionConnected = false;
+
+const EXTENSION_STORE_URL = 'https://chromewebstore.google.com/detail/bud-ai/PLACEHOLDER_ID';
+
+function updateExtensionStatus(connected) {
+  _extensionConnected = connected;
+  const dot = document.getElementById('browser-status-dot');
+  const lbl = document.getElementById('browser-status-label');
+  if (!dot || !lbl) return;
+  if (connected) {
+    dot.style.background = '#3a7a3a';
+    lbl.style.color = '#5a9a5a';
+    lbl.textContent = 'Chrome connected';
+    // Hide install banner if showing
+    const banner = document.getElementById('ext-install-banner');
+    if (banner) banner.style.display = 'none';
+  } else {
+    dot.style.background = '#3a3530';
+    lbl.style.color = '#3a3530';
+    lbl.textContent = 'Install extension';
+    lbl.style.cursor = 'pointer';
+    lbl.onclick = showExtensionPrompt;
+  }
+}
+
+function showExtensionPrompt() {
+  // Show inline install card in chat
+  const msgs = document.getElementById('chat-messages');
+  if (!msgs || document.getElementById('ext-prompt-card')) return;
+  const card = document.createElement('div');
+  card.id = 'ext-prompt-card';
+  card.className = 'fade-in';
+  card.style.cssText = 'margin:.75rem 0;border:1px solid #2a2520;border-left:3px solid #c8a45e;border-radius:8px;background:#0d0b09;padding:1rem 1.25rem;';
+  card.innerHTML = `
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.6rem;">
+      <svg width="18" height="18" fill="none" stroke="#c8a45e" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      <span style="font-size:.85rem;color:#c8a45e;font-weight:600;">Install the bud extension to browse in your browser</span>
+    </div>
+    <p style="font-size:.78rem;color:#6a6055;line-height:1.6;margin-bottom:.85rem;">
+      The bud Chrome extension lets me open websites in a dedicated tab group in your browser, stream screenshots live, and interact with pages — just like you see in Claude's computer use. Without it I use a headless browser you can't see.
+    </p>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;">
+      <a href="${EXTENSION_STORE_URL}" target="_blank"
+        style="padding:.45rem 1rem;background:#c8a45e;color:#000;border-radius:6px;font-size:.78rem;font-weight:700;text-decoration:none;">
+        Install from Chrome Web Store
+      </a>
+      <button onclick="this.closest('#ext-prompt-card').remove()"
+        style="padding:.45rem .75rem;background:#1a1815;border:1px solid #2a2520;border-radius:6px;font-size:.78rem;color:#6a6055;cursor:pointer;">
+        Use headless browser instead
+      </button>
+    </div>`;
+  msgs.appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+// Check on load — show banner if not connected after 2s
+fetch('/api/extension/status').then(r => r.json()).then(d => {
+  updateExtensionStatus(d.connected);
+  if (!d.connected) {
+    // Show subtle top banner once
+    if (!localStorage.getItem('bud_ext_dismissed')) {
+      const banner = document.createElement('div');
+      banner.id = 'ext-install-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:500;background:#1a1510;border-bottom:1px solid #c8a45e33;padding:.4rem 1rem;display:flex;align-items:center;justify-content:center;gap:.75rem;font-size:.72rem;';
+      banner.innerHTML = `
+        <span style="color:#8a7e6e;">Install the <strong style="color:#c8a45e;">bud Chrome extension</strong> to let bud browse in your real browser</span>
+        <a href="${EXTENSION_STORE_URL}" target="_blank" style="color:#c8a45e;font-weight:600;text-decoration:none;padding:.2rem .6rem;border:1px solid #c8a45e44;border-radius:4px;">Install</a>
+        <button onclick="this.parentElement.style.display='none';localStorage.setItem('bud_ext_dismissed','1')" style="background:none;border:none;color:#3a3530;cursor:pointer;font-size:.9rem;">✕</button>`;
+      document.body.prepend(banner);
+    }
+  }
+}).catch(() => {});
+
+// ─── Mobile navigation ────────────────────────────────────────────────────────
+const _sidebar  = () => document.getElementById('main-sidebar');
+const _activity = () => document.getElementById('activity-panel');
+
+function openMobileSidebar() {
+  _sidebar()?.classList.add('mobile-open');
+  document.getElementById('sidebar-overlay').classList.add('show');
+}
+function closeMobileSidebar() {
+  _sidebar()?.classList.remove('mobile-open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
+}
+
+function mobileNav(tab) {
+  document.querySelectorAll('#mobile-nav button').forEach(b => b.classList.remove('active'));
+  if (tab === 'chat') {
+    document.getElementById('mnav-chat').classList.add('active');
+    _activity()?.classList.remove('mobile-open');
+    closeMobileSidebar();
+  } else if (tab === 'activity') {
+    document.getElementById('mnav-activity').classList.add('active');
+    _activity()?.classList.add('mobile-open');
+    closeMobileSidebar();
+  } else if (tab === 'sessions') {
+    document.getElementById('mnav-sessions').classList.add('active');
+    openMobileSidebar();
+    _activity()?.classList.remove('mobile-open');
+  }
+}
+
+// Close activity panel when a message is sent on mobile
+const _origSend = sendMessage;
+sendMessage = function(...args) {
+  if (window.innerWidth <= 768) mobileNav('chat');
+  return _origSend(...args);
+};
+
+// ─── Feature 2: In-chat thinking block ───────────────────────────────────────
+(function patchThinkingIntoChat() {
+  const _origHandleEvent = handleEvent;
+  handleEvent = function(ev) {
+    if (ev.type === 'thinking' && (!ev.session_id || ev.session_id === currentSessionId)) {
+      let tb = document.getElementById('current-thinking-block');
+      if (!tb) {
+        tb = document.createElement('div');
+        tb.id = 'current-thinking-block';
+        tb.className = 'thinking-block fade-in';
+        tb._startTime = Date.now();
+        tb.innerHTML = `
+          <div class="thinking-block-header" onclick="
+            this.nextElementSibling.classList.toggle('collapsed');
+            this.querySelector('.thinking-toggle').textContent = this.nextElementSibling.classList.contains('collapsed') ? 'show' : 'hide';
+          ">
+            <div class="thinking-spin"></div>
+            <span class="thinking-label">Thinking</span>
+            <span class="thinking-timer" id="think-timer">0s</span>
+            <span class="thinking-toggle">hide</span>
+          </div>
+          <div class="thinking-block-body"></div>`;
+        document.getElementById('chat-messages').appendChild(tb);
+        // start elapsed timer
+        tb._timerInterval = setInterval(() => {
+          const el = document.getElementById('think-timer');
+          if (el) el.textContent = Math.round((Date.now() - tb._startTime) / 1000) + 's';
+        }, 1000);
+        scrollChat();
+      }
+      tb.querySelector('.thinking-block-body').textContent = ev.content;
+      scrollChat();
+    }
+    _origHandleEvent(ev);
+  };
+})();
+
+(function patchFinalizeForThinking() {
+  const _origFinalize = finalizeMessage;
+  finalizeMessage = function(tokenUsage) {
+    const tb = document.getElementById('current-thinking-block');
+    if (tb) {
+      tb.removeAttribute('id');
+      clearInterval(tb._timerInterval);
+      const elapsed = Math.round((Date.now() - (tb._startTime || Date.now())) / 1000);
+      tb.querySelector('.thinking-block-body')?.classList.add('collapsed');
+      const header = tb.querySelector('.thinking-block-header');
+      if (header) {
+        header.innerHTML = `
+          <div class="thinking-done-icon">✓</div>
+          <span class="thinking-label" style="color:#4a4540">Thought for ${elapsed}s</span>
+          <span class="thinking-toggle" style="margin-left:auto">show</span>`;
+        header.onclick = function() {
+          const body = tb.querySelector('.thinking-block-body');
+          body?.classList.toggle('collapsed');
+          header.querySelector('.thinking-toggle').textContent = body?.classList.contains('collapsed') ? 'show' : 'hide';
+        };
+      }
+    }
+    _origFinalize(tokenUsage);
+  };
+})();
+
+// ─── Feature 3: Image paste + drop into input ─────────────────────────────────
+(function initImagePaste() {
+  const textarea = document.getElementById('user-input');
+  if (!textarea) return;
+  textarea.addEventListener('paste', function(e) {
+    const files = e.clipboardData && e.clipboardData.files;
+    if (!files || !files.length) return;
+    for (const f of files) {
+      if (f.type.startsWith('image/')) {
+        e.preventDefault();
+        addImageAttachment(f);
+      }
+    }
+  });
+})();
+
+function addImageAttachment(file) {
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    const dataUrl = ev.target.result;
+    const id = 'img-' + Date.now();
+    _attachments.push({ type: 'image', filename: file.name, dataUrl, id });
+    const bar = document.getElementById('attachments-bar');
+    bar.classList.remove('hidden');
+    const wrap = document.createElement('div');
+    wrap.className = 'attached-file';
+    wrap.dataset.imgId = id;
+    wrap.innerHTML = `<img src="${dataUrl}" class="img-preview" style="width:40px;height:40px;" /><span>${escHtml(file.name)}</span><span class="remove-file" onclick="removeImgAttachment('${id}',this.parentElement)">✕</span>`;
+    bar.appendChild(wrap);
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeImgAttachment(id, el) {
+  _attachments = _attachments.filter(a => a.id !== id);
+  el.remove();
+  if (_attachments.length === 0) document.getElementById('attachments-bar').classList.add('hidden');
+}
+
+// Patch sendMessage to handle image attachments
+(function patchSendForImages() {
+  const _origSendMsg = sendMessage;
+  sendMessage = function() {
+    const imageAttachments = _attachments.filter(a => a.type === 'image');
+    if (imageAttachments.length > 0 && currentSessionId) {
+      const input = document.getElementById('user-input');
+      const userText = input.value.trim();
+      if (!userText && !imageAttachments.length) return;
+      const content = [
+        { type: 'text', text: userText || '(image)' },
+        ...imageAttachments.map(a => ({ type: 'image_url', image_url: { url: a.dataUrl } }))
+      ];
+      // Show user message with thumbnail
+      document.getElementById('welcome').style.display = 'none';
+      const el = document.createElement('div');
+      el.className = 'flex justify-end fade-in';
+      const imgThumb = imageAttachments.map(a => `<img src="${a.dataUrl}" class="msg-image" style="max-width:180px;" />`).join('');
+      el.innerHTML = `<div class="max-w-lg px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed text-cream" style="background:#1e1b17;border:1px solid #2a2520;">${imgThumb}${userText ? '<div>' + escHtml(userText).replace(/\n/g,'<br/>') + '</div>' : ''}</div>`;
+      document.getElementById('chat-messages').appendChild(el);
+      scrollChat();
+      // Clear image attachments before calling orig
+      _attachments = _attachments.filter(a => a.type !== 'image');
+      document.querySelectorAll('[data-img-id]').forEach(el => el.remove());
+      if (_attachments.length === 0) document.getElementById('attachments-bar').classList.add('hidden');
+      input.value = '';
+      isThinking = true;
+      document.getElementById('send-btn').disabled = true;
+      document.getElementById('user-input').disabled = true;
+      setStatus('Thinking…', true);
+      ws.send(JSON.stringify({ type: 'message', session_id: currentSessionId, content }));
+      return;
+    }
+    _origSendMsg();
+  };
+})();
+
+// ─── Feature 4: Drag to reorder sessions ─────────────────────────────────────
+let _dragSrcId = null;
+
+function onSessionDragStart(e, id) {
+  _dragSrcId = id;
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onSessionDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+function onSessionDrop(e, targetId) {
+  e.preventDefault();
+  if (_dragSrcId === targetId) return;
+  const items = [...document.querySelectorAll('.session-item')];
+  const ids = items.map(el => el.dataset.id);
+  const from = ids.indexOf(_dragSrcId), to = ids.indexOf(targetId);
+  if (from < 0 || to < 0) return;
+  ids.splice(from, 1); ids.splice(to, 0, _dragSrcId);
+  fetch('/api/sessions/reorder', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order: ids}) });
+  ws.send(JSON.stringify({type:'list_sessions'}));
+}
+
+// ─── Feature 5: Pin sessions ──────────────────────────────────────────────────
+async function togglePin(id, currentlyPinned) {
+  await fetch(`/api/sessions/${id}/pin`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pinned: !currentlyPinned}) });
+  ws.send(JSON.stringify({type:'list_sessions'}));
+}
+
+// Patch renderSessions to add drag + pin
+(function patchRenderSessions() {
+  const _origRender = renderSessions;
+  renderSessions = function(list) {
+    _origRender(list);
+    // Add draggable + pin btn to each session item
+    document.querySelectorAll('.session-item').forEach(div => {
+      const id = div.dataset.id;
+      const session = list.find(s => s.id === id) || {};
+      div.draggable = true;
+      div.addEventListener('dragstart', e => onSessionDragStart(e, id));
+      div.addEventListener('dragover',  e => onSessionDragOver(e));
+      div.addEventListener('drop',      e => onSessionDrop(e, id));
+      // Pin button — inject before the delete button
+      const firstRow = div.querySelector('.flex.items-start');
+      if (firstRow && !div.querySelector('.pin-btn')) {
+        const pinBtn = document.createElement('button');
+        pinBtn.className = 'pin-btn flex-shrink-0';
+        pinBtn.title = session.pinned ? 'Unpin' : 'Pin';
+        pinBtn.style.cssText = `opacity:${session.pinned ? '1' : '0'};color:${session.pinned ? '#c8a45e' : '#5a5045'};font-size:.7rem;`;
+        pinBtn.textContent = '📌';
+        pinBtn.onclick = function(e) { e.stopPropagation(); togglePin(id, !!session.pinned); };
+        firstRow.insertBefore(pinBtn, firstRow.firstChild);
+      }
+    });
+  };
+})();
+
+// ─── Feature 6: Export Markdown ───────────────────────────────────────────────
+async function exportMarkdown() {
+  document.getElementById('export-menu').classList.add('hidden');
+  if (!currentSessionId) return;
+  try {
+    const res = await fetch(`/api/export/${currentSessionId}?format=markdown`);
+    if (!res.ok) { exportChat('md'); return; } // fallback
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'chat.md'; a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) { exportChat('md'); }
+}
+
+// ─── Feature 9: Canvas mode ───────────────────────────────────────────────────
+let _canvasActive = false;
+
+function toggleCanvas() {
+  _canvasActive = !_canvasActive;
+  const panel = document.getElementById('canvas-panel');
+  const btn   = document.getElementById('canvas-toggle-btn');
+  panel.classList.toggle('show', _canvasActive);
+  btn.style.color  = _canvasActive ? '#c8a45e' : '';
+  btn.style.borderColor = _canvasActive ? '#c8a45e44' : '';
+}
+
+function copyCanvas() {
+  const text = document.getElementById('canvas-editor').value;
+  navigator.clipboard.writeText(text).catch(() => {});
+}
+
+function clearCanvas() {
+  document.getElementById('canvas-editor').value = '';
+}
+
+function downloadCanvas() {
+  const text = document.getElementById('canvas-editor').value;
+  const blob = new Blob([text], {type:'text/markdown'});
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'canvas.md'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function sendToCanvas(text) {
+  const editor = document.getElementById('canvas-editor');
+  if (!_canvasActive) toggleCanvas();
+  editor.value += (editor.value ? '\n\n---\n\n' : '') + text;
+}
+
+// Patch appendAssistantMessage to add "→ Canvas" button
+(function patchAssistantMsgForCanvas() {
+  const _origAppend = appendAssistantMessage;
+  appendAssistantMessage = function(md) {
+    const el = _origAppend(md);
+    if (el && el.parentElement) {
+      el.parentElement.classList.add('prose-wrapper');
+      const canvasBtn = document.createElement('button');
+      canvasBtn.className = 'send-to-canvas';
+      canvasBtn.textContent = '→ Canvas';
+      canvasBtn.onclick = () => sendToCanvas(md);
+      el.parentElement.appendChild(canvasBtn);
+    }
+    return el;
+  };
+})();
+
+// Also patch finalizeMessage to add canvas button to streamed messages
+(function patchFinalizeForCanvas() {
+  const _origFin = finalizeMessage;
+  finalizeMessage = function(tokenUsage) {
+    const content = pendingContent;
+    _origFin(tokenUsage);
+    // After finalize, find the last assistant message wrapper and add canvas btn
+    const msgs = document.getElementById('chat-messages');
+    const wrappers = [...msgs.querySelectorAll('.flex.gap-3.fade-in')];
+    const last = wrappers[wrappers.length - 1];
+    if (last && !last.querySelector('.send-to-canvas')) {
+      last.classList.add('prose-wrapper');
+      const canvasBtn = document.createElement('button');
+      canvasBtn.className = 'send-to-canvas';
+      canvasBtn.textContent = '→ Canvas';
+      canvasBtn.onclick = () => sendToCanvas(content);
+      last.appendChild(canvasBtn);
+    }
+  };
+})();
+
+// ─── Feature 10: Web search URL rendering in tool results ─────────────────────
+(function patchToolResultForURLs() {
+  const _origRenderResult = renderToolResult;
+  renderToolResult = function(tool, output, image_path, status, app_url) {
+    _origRenderResult(tool, output, image_path, status, app_url);
+    if (tool !== 'web_search' && tool !== 'ddgs_search') return;
+    // Find the latest card for this tool and replace plain output with rich links
+    const feed = document.getElementById('activity-feed');
+    const cards = [...feed.querySelectorAll('.tool-card')].reverse();
+    const card = cards.find(c => { const h = c.querySelector('.tool-header span.font-mono.text-gold'); return h && h.textContent === tool; });
+    if (!card) return;
+    const resultArea = card.querySelector('.result-area');
+    if (!resultArea) return;
+    // Extract URLs from output
+    const lines = output.split('\n');
+    const urlLines = lines.filter(l => l.trim().match(/^https?:\/\//));
+    if (!urlLines.length) return;
+    const linksHtml = urlLines.map(url => {
+      url = url.trim();
+      let domain = '';
+      try { domain = new URL(url).hostname; } catch(e) {}
+      return `<a href="${escHtml(url)}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:.4rem;padding:.2rem 0;color:#c8a45e;font-size:.72rem;font-family:monospace;text-decoration:none;"><img src="https://www.google.com/s2/favicons?domain=${escHtml(domain)}" width="12" height="12" onerror="this.style.display='none'" />${escHtml(domain)}</a>`;
+    }).join('');
+    const existingOutput = resultArea.querySelector('.code-output');
+    if (existingOutput) {
+      const linkDiv = document.createElement('div');
+      linkDiv.style.cssText = 'padding:.25rem .1rem;';
+      linkDiv.innerHTML = linksHtml;
+      resultArea.appendChild(linkDiv);
+    }
+  };
+})();
+
+// ─── Feature 7: Personas ──────────────────────────────────────────────────────
+let _personas = [];
+let _activePersona = null;
+
+async function loadPersonas() {
+  try {
+    const res = await fetch('/api/personas');
+    _personas = await res.json();
+  } catch(e) { _personas = []; }
+  renderPersonas();
+}
+
+function renderPersonas() {
+  const el = document.getElementById('personas-list');
+  if (!el) return;
+  if (!_personas.length) {
+    el.innerHTML = '<p class="text-xs text-faint">No personas yet. Create one below.</p>';
+    return;
+  }
+  el.innerHTML = _personas.map(p => `
+    <div class="rounded-lg p-3" style="background:#0e0c0a;border:${p.id === _activePersona ? '1px solid #c8a45e' : '1px solid #2a2520'};">
+      <div class="flex items-start justify-between gap-2">
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-mono" style="color:${p.id === _activePersona ? '#c8a45e' : '#e4d8c4'};">${escHtml(p.name)}</p>
+          ${p.description ? `<p class="text-xs text-faint mt-0.5">${escHtml(p.description)}</p>` : ''}
+        </div>
+        <div class="flex gap-1.5 flex-shrink-0">
+          <button onclick="setActivePersona('${p.id}')" class="canvas-btn" style="${p.id === _activePersona ? 'color:#c8a45e;border-color:#c8a45e44;' : ''}">
+            ${p.id === _activePersona ? 'Active' : 'Use'}
+          </button>
+          ${!p.builtin ? `<button onclick="deletePersona('${p.id}')" class="canvas-btn" style="color:#e06060;border-color:#4a2020;">Del</button>` : ''}
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+async function setActivePersona(id) {
+  _activePersona = id;
+  await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({active_persona: id}) });
+  renderPersonas();
+}
+
+async function deletePersona(id) {
+  if (!confirm('Delete this persona?')) return;
+  await fetch(`/api/personas/${id}`, { method:'DELETE' });
+  await loadPersonas();
+}
+
+async function saveNewPersona() {
+  const name   = document.getElementById('new-persona-name').value.trim();
+  const desc   = document.getElementById('new-persona-desc').value.trim();
+  const prompt = document.getElementById('new-persona-prompt').value.trim();
+  if (!name || !prompt) { alert('Name and system prompt are required.'); return; }
+  try {
+    await fetch('/api/personas', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, description: desc, system_prompt: prompt}) });
+    document.getElementById('new-persona-name').value = '';
+    document.getElementById('new-persona-desc').value = '';
+    document.getElementById('new-persona-prompt').value = '';
+    await loadPersonas();
+  } catch(e) { alert('Could not save persona.'); }
+}
+
+// ─── Feature 8: Memory browser ────────────────────────────────────────────────
+let _allMemories = [];
+
+async function loadMemoryBrowser() {
+  const listEl = document.getElementById('memory-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p class="text-xs text-faint">Loading…</p>';
+  try {
+    const res = await fetch('/api/memories');
+    const data = await res.json();
+    _allMemories = data.facts || data || [];
+    renderMemoryList(_allMemories);
+  } catch(e) {
+    listEl.innerHTML = '<p class="text-xs text-faint">Could not load memories.</p>';
+  }
+}
+
+function renderMemoryList(mems) {
+  const listEl = document.getElementById('memory-list');
+  const countEl = document.getElementById('memory-count');
+  if (!listEl) return;
+  if (countEl) countEl.textContent = mems.length + ' fact' + (mems.length !== 1 ? 's' : '');
+  if (!mems.length) {
+    listEl.innerHTML = '<p class="text-xs text-faint">No memories stored yet.</p>';
+    return;
+  }
+  listEl.innerHTML = mems.map(m => `
+    <div class="flex items-center justify-between gap-2 rounded px-3 py-2" style="background:#0e0c0a;border:1px solid #2a2520;">
+      <span class="text-xs text-cream flex-1">${escHtml(typeof m === 'string' ? m : (m.content || m.fact || JSON.stringify(m)))}</span>
+      <button onclick="deleteMemory(${JSON.stringify(m.id || m)})" class="canvas-btn flex-shrink-0" style="color:#e06060;border-color:#4a2020;">Del</button>
+    </div>`).join('');
+}
+
+function filterMemories() {
+  const q = (document.getElementById('memory-search')?.value || '').toLowerCase();
+  const filtered = q ? _allMemories.filter(m => {
+    const text = typeof m === 'string' ? m : (m.content || m.fact || JSON.stringify(m));
+    return text.toLowerCase().includes(q);
+  }) : _allMemories;
+  renderMemoryList(filtered);
+}
+
+async function deleteMemory(id) {
+  try {
+    await fetch(`/api/memories/${encodeURIComponent(id)}`, { method:'DELETE' });
+    await loadMemoryBrowser();
+  } catch(e) { alert('Could not delete memory.'); }
+}
+
+// ─── Feature 11: Slash command builder ───────────────────────────────────────
+let _customCommands = [];
+
+async function loadCommands() {
+  try {
+    const res = await fetch('/api/settings');
+    const cfg = await res.json();
+    _customCommands = cfg.custom_commands || [];
+  } catch(e) { _customCommands = []; }
+  renderCommands();
+}
+
+function renderCommands() {
+  const el = document.getElementById('commands-list');
+  if (!el) return;
+  const allCmds = [...TEMPLATES.map((t,i) => ({...t, id: 'builtin-'+i, builtin: true})), ..._customCommands];
+  if (!allCmds.length) { el.innerHTML = '<p class="text-xs text-faint">No commands yet.</p>'; return; }
+  el.innerHTML = allCmds.map(c => `
+    <div class="rounded-lg p-3" style="background:#0e0c0a;border:1px solid #2a2520;">
+      <div class="flex items-start justify-between gap-2">
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-mono" style="color:#c8a45e;">${escHtml(c.trigger || c.title)}</p>
+          ${c.builtin ? '' : `<p class="text-xs text-faint mt-0.5 truncate">${escHtml((c.text||c.prompt||'').slice(0,60))}</p>`}
+        </div>
+        ${!c.builtin ? `<button onclick="deleteCommand('${escHtml(c.trigger)}')" class="canvas-btn flex-shrink-0" style="color:#e06060;border-color:#4a2020;">Del</button>` : '<span class="text-xs text-faint">built-in</span>'}
+      </div>
+    </div>`).join('');
+}
+
+async function saveNewCommand() {
+  const trigger = document.getElementById('new-cmd-trigger').value.trim();
+  const title   = document.getElementById('new-cmd-title').value.trim();
+  const prompt  = document.getElementById('new-cmd-prompt').value.trim();
+  if (!trigger || !prompt) { alert('Trigger and prompt are required.'); return; }
+  const trig = trigger.startsWith('/') ? trigger : '/' + trigger;
+  _customCommands = _customCommands.filter(c => c.trigger !== trig);
+  _customCommands.push({ trigger: trig, title: title || trig, text: prompt });
+  await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({custom_commands: _customCommands}) });
+  document.getElementById('new-cmd-trigger').value = '';
+  document.getElementById('new-cmd-title').value = '';
+  document.getElementById('new-cmd-prompt').value = '';
+  renderCommands();
+  _mergeCustomCommandsIntoTemplates();
+}
+
+async function deleteCommand(trigger) {
+  _customCommands = _customCommands.filter(c => c.trigger !== trigger);
+  await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({custom_commands: _customCommands}) });
+  renderCommands();
+  _mergeCustomCommandsIntoTemplates();
+}
+
+function _mergeCustomCommandsIntoTemplates() {
+  // Remove previously merged custom commands (non-builtin)
+  const builtinCount = 10; // TEMPLATES has 10 items
+  TEMPLATES.splice(builtinCount);
+  for (const c of _customCommands) {
+    TEMPLATES.push({ title: c.title || c.trigger, text: c.text || c.prompt || '' });
+  }
+}
+
+// Patch switchSettingsTab to update titles for new tabs
+(function patchSwitchTabTitles() {
+  const _orig = switchSettingsTab;
+  switchSettingsTab = function(tab) {
+    _orig(tab);
+    const extra = { personas: 'Personas', memorybrowser: 'Memory Browser', commands: 'Slash Commands' };
+    if (extra[tab]) document.getElementById('settings-section-title').textContent = extra[tab];
+  };
+})();
+
+// Load custom commands into templates on startup
+(async function initCustomCommands() {
+  try {
+    const cfg = await (await fetch('/api/settings')).json();
+    if (cfg.custom_commands?.length) {
+      _customCommands = cfg.custom_commands;
+      _mergeCustomCommandsIntoTemplates();
+    }
+    _activePersona = cfg.active_persona || null;
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>
