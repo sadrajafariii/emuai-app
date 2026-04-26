@@ -173,6 +173,7 @@ h1{color:#c8a45e;}h2{color:#c8a45e;font-size:1.1rem;margin-top:2rem;}a{color:#c8
 </body></html>""")
 
 @app.get("/")
+@app.head("/")
 async def root():
     return FileResponse("static/index.html")
 
