@@ -106,6 +106,39 @@ class BrowserSession:
             })
         return web_path
 
+    async def _page_context(self) -> str:
+        """Extract interactive elements and visible text so the LLM can 'see' the page."""
+        try:
+            data = await self._page.evaluate("""() => {
+                const els = [];
+                document.querySelectorAll(
+                    'a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="menuitem"], [data-testid]'
+                ).forEach(el => {
+                    const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || el.getAttribute('data-testid') || '').trim().slice(0, 80);
+                    const tag = el.tagName.toLowerCase();
+                    const testid = el.getAttribute('data-testid') || '';
+                    const role = el.getAttribute('role') || '';
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0 && text) {
+                        els.push({tag, role, testid, text, x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2)});
+                    }
+                });
+                // Deduplicate by text
+                const seen = new Set();
+                return els.filter(e => {
+                    const key = e.text + e.testid;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                }).slice(0, 40);
+            }""")
+            if not data:
+                return ""
+            lines = [f"  [{e['tag']}]{' data-testid='+e['testid'] if e['testid'] else ''} \"{e['text']}\" @ x={e['x']},y={e['y']}" for e in data]
+            return "\n\nVISIBLE ELEMENTS (use these for clicking):\n" + "\n".join(lines)
+        except Exception:
+            return ""
+
     # ── public methods ────────────────────────────────────────────────────────
 
     async def navigate(self, url: str, send=None) -> dict:
@@ -120,8 +153,9 @@ class BrowserSession:
             except Exception as exc:
                 return {"output": f"Navigation error: {exc}", "image_path": None}
             img = await self._snap("Page loaded", send)
+            ctx = await self._page_context()
             return {
-                "output": f"Navigated to: {self._page.url}\nTitle: {await self._page.title()}",
+                "output": f"Navigated to: {self._page.url}\nTitle: {await self._page.title()}{ctx}",
                 "image_path": img,
             }
 
@@ -148,10 +182,12 @@ class BrowserSession:
                     await el.click(timeout=8_000)
                 await self._page.wait_for_timeout(900)
                 img = await self._snap(f"Clicked: {selector[:40]}", send)
-                return {"output": f"Clicked '{selector}'. URL: {self._page.url}", "image_path": img}
+                ctx = await self._page_context()
+                return {"output": f"Clicked '{selector}'. URL: {self._page.url}{ctx}", "image_path": img}
             except Exception as exc:
                 img = await self._snap("Click failed", send)
-                return {"output": f"Click failed ({exc}). See screenshot.", "image_path": img}
+                ctx = await self._page_context()
+                return {"output": f"Click failed ({exc}). Try using x=,y= coordinates from VISIBLE ELEMENTS below.{ctx}", "image_path": img}
 
     async def type_text(self, selector: str, text: str, send=None) -> dict:
         async with self._get_lock():
@@ -172,10 +208,12 @@ class BrowserSession:
                     await el.fill(text)
                 await self._page.wait_for_timeout(400)
                 img = await self._snap(f"Typed into {selector[:30]}", send)
-                return {"output": f"Typed '{text[:80]}' into '{selector}'", "image_path": img}
+                ctx = await self._page_context()
+                return {"output": f"Typed '{text[:80]}' into '{selector}'.{ctx}", "image_path": img}
             except Exception as exc:
                 img = await self._snap("Type failed", send)
-                return {"output": f"Type failed ({exc}). See screenshot.", "image_path": img}
+                ctx = await self._page_context()
+                return {"output": f"Type failed ({exc}). Use x=,y= coordinates from VISIBLE ELEMENTS below.{ctx}", "image_path": img}
 
     async def press_key(self, key: str, send=None) -> dict:
         async with self._get_lock():
