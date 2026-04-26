@@ -42,7 +42,7 @@ DEFAULTS: dict = {
     "max_tokens": 4096,
 
     # Groq (ultra-fast free Llama)
-    "groq_enabled": False,
+    "groq_enabled": True,
     "groq_api_key": os.getenv("GROQ_API_KEY", ""),
     "groq_model": "llama-3.3-70b-versatile",
 
