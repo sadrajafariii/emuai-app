@@ -424,7 +424,6 @@ async def run_agent(
 
         # ── final answer ──────────────────────────────────────────────────────
         if not tool_calls:
-            await emit({"type": "token", "content": content})
             await emit({
                 "type": "message_complete",
                 "token_usage": {
