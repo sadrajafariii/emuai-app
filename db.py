@@ -152,6 +152,35 @@ async def init_db():
             );
         """)
 
+        # FTS5 virtual tables for fast full-text memory/vault search
+        await db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
+            USING fts5(fact, user_id UNINDEXED, content='facts', content_rowid='id')
+        """)
+        await db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts
+            USING fts5(title, content, user_id UNINDEXED, content='vault', content_rowid='rowid')
+        """)
+
+        # FTS5 triggers to keep index in sync with base tables
+        await db.executescript("""
+            CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
+                INSERT INTO facts_fts(rowid, fact, user_id) VALUES (new.id, new.fact, new.user_id);
+            END;
+            CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
+                INSERT INTO facts_fts(facts_fts, rowid, fact, user_id)
+                    VALUES ('delete', old.id, old.fact, old.user_id);
+            END;
+            CREATE TRIGGER IF NOT EXISTS vault_ai AFTER INSERT ON vault BEGIN
+                INSERT INTO vault_fts(rowid, title, content, user_id)
+                    VALUES (new.rowid, new.title, new.content, new.user_id);
+            END;
+            CREATE TRIGGER IF NOT EXISTS vault_ad AFTER DELETE ON vault BEGIN
+                INSERT INTO vault_fts(vault_fts, rowid, title, content, user_id)
+                    VALUES ('delete', old.rowid, old.title, old.content, old.user_id);
+            END;
+        """)
+
         # Safe migrations for pre-existing databases
         for stmt in [
             "ALTER TABLE sessions ADD COLUMN pinned INTEGER DEFAULT 0",
@@ -391,17 +420,32 @@ async def save_fact(fact: str, user_id: str = None):
 async def search_facts(query: str, user_id: str = None) -> list[str]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        terms = query.lower().split()
-        conditions = " AND ".join(["lower(fact) LIKE ?" for _ in terms])
-        params = [f"%{t}%" for t in terms]
-        if user_id:
-            sql = f"SELECT fact FROM facts WHERE user_id=? AND {conditions} ORDER BY id DESC LIMIT 20"
-            params = [user_id] + params
-        else:
-            sql = f"SELECT fact FROM facts WHERE {conditions} ORDER BY id DESC LIMIT 20"
-        async with db.execute(sql, params) as cur:
-            rows = await cur.fetchall()
-    return [r["fact"] for r in rows]
+        # Use FTS5 for ranked full-text search; fall back to LIKE on any error
+        try:
+            fts_query = " OR ".join(f'"{t}"' for t in query.split() if t)
+            if user_id:
+                sql = ("SELECT fact FROM facts_fts WHERE facts_fts MATCH ? "
+                       "AND user_id IS ? ORDER BY rank LIMIT 20")
+                params = [fts_query, user_id]
+                else:
+                sql = "SELECT fact FROM facts_fts WHERE facts_fts MATCH ? ORDER BY rank LIMIT 20"
+                params = [fts_query]
+            async with db.execute(sql, params) as cur:
+                rows = await cur.fetchall()
+            return [r["fact"] for r in rows]
+        except Exception:
+            # FTS5 fallback: plain LIKE search
+            terms = query.lower().split()
+            conditions = " AND ".join(["lower(fact) LIKE ?" for _ in terms])
+            like_params = [f"%{t}%" for t in terms]
+            if user_id:
+                sql = f"SELECT fact FROM facts WHERE user_id=? AND {conditions} ORDER BY id DESC LIMIT 20"
+                like_params = [user_id] + like_params
+            else:
+                sql = f"SELECT fact FROM facts WHERE {conditions} ORDER BY id DESC LIMIT 20"
+            async with db.execute(sql, like_params) as cur:
+                rows = await cur.fetchall()
+            return [r["fact"] for r in rows]
 
 
 async def get_all_facts(user_id: str = None) -> list[str]:
@@ -463,17 +507,36 @@ async def vault_add(title: str, content: str, user_id: str = None) -> str:
 async def vault_search(query: str, user_id: str = None) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        terms = query.lower().split()[:5]
-        conditions = " OR ".join(["lower(content) LIKE ? OR lower(title) LIKE ?" for _ in terms])
-        params = [p for t in terms for p in (f"%{t}%", f"%{t}%")]
-        if user_id:
-            sql = f"SELECT id, title, content, created_at FROM vault WHERE user_id=? AND ({conditions}) ORDER BY created_at DESC LIMIT 10"
-            params = [user_id] + params
-        else:
-            sql = f"SELECT id, title, content, created_at FROM vault WHERE {conditions} ORDER BY created_at DESC LIMIT 10"
-        async with db.execute(sql, params) as cur:
-            rows = await cur.fetchall()
-    return [dict(r) for r in rows]
+        try:
+            fts_query = " OR ".join(f'"{t}"' for t in query.split() if t)
+            if user_id:
+                sql = ("SELECT v.id, v.title, v.content, v.created_at "
+                       "FROM vault_fts f JOIN vault v ON v.rowid = f.rowid "
+                       "WHERE vault_fts MATCH ? AND f.user_id IS ? ORDER BY rank LIMIT 10")
+                params = [fts_query, user_id]
+            else:
+                sql = ("SELECT v.id, v.title, v.content, v.created_at "
+                       "FROM vault_fts f JOIN vault v ON v.rowid = f.rowid "
+                       "WHERE vault_fts MATCH ? ORDER BY rank LIMIT 10")
+                params = [fts_query]
+            async with db.execute(sql, params) as cur:
+                rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            # Fallback to LIKE
+            terms = query.lower().split()[:5]
+            conditions = " OR ".join(["lower(content) LIKE ? OR lower(title) LIKE ?" for _ in terms])
+            like_params = [p for t in terms for p in (f"%{t}%", f"%{t}%")]
+            if user_id:
+                sql = (f"SELECT id, title, content, created_at FROM vault "
+                       f"WHERE user_id=? AND ({conditions}) ORDER BY created_at DESC LIMIT 10")
+                like_params = [user_id] + like_params
+            else:
+                sql = (f"SELECT id, title, content, created_at FROM vault "
+                       f"WHERE {conditions} ORDER BY created_at DESC LIMIT 10")
+            async with db.execute(sql, like_params) as cur:
+                rows = await cur.fetchall()
+            return [dict(r) for r in rows]
 
 
 async def vault_list(user_id: str = None) -> list[dict]:

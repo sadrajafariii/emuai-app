@@ -16,6 +16,16 @@ import llm_router
 import settings_store
 from tools import TOOL_SCHEMAS, execute_tool
 
+# Token counting (tiktoken) — soft import so server still runs without it
+try:
+    import tiktoken
+    _enc = tiktoken.get_encoding("cl100k_base")
+    def _count_tokens(text: str) -> int:
+        return len(_enc.encode(text, disallowed_special=()))
+except Exception:
+    def _count_tokens(text: str) -> int:  # type: ignore[misc]
+        return len(text) // 4  # rough fallback
+
 # Context variable so tools.py can pick up the current user_id without param threading
 current_user_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_user_id", default=None)
 
@@ -39,10 +49,11 @@ _pending_permissions: dict[str, dict[str, asyncio.Future]] = {}
 # Active agent tasks per session
 _active_tasks: dict[str, asyncio.Task] = {}
 
-today = datetime.utcnow().strftime("%B %d, %Y")
+def _now_str() -> str:
+    return datetime.utcnow().strftime("%A, %B %d, %Y at %H:%M UTC")
 
-_BASE_SYSTEM_PROMPT = f"""You are bud — a powerful, autonomous personal AI agent running locally on the user's computer.
-Today's date is {today}.
+_BASE_SYSTEM_PROMPT = """You are bud — a powerful, autonomous personal AI agent running locally on the user's computer.
+Today is {today}.
 
 You can browse the web, execute code, generate images, manage files, download videos, and remember things across conversations.
 
@@ -216,7 +227,13 @@ Use this to store X/Twitter passwords, API keys, etc. so you can reuse them acro
 - set_reminder(message, seconds) — desktop notification after N seconds
 - browser_read_full_page(max_scrolls) — scroll entire page and collect all text
 
-Respond in Markdown when it improves readability."""
+Respond in Markdown when it improves readability.
+
+## Self-correction rules
+- If a tool returns an error, IMMEDIATELY try a different approach — don't repeat the exact same call.
+- If web search returns nothing useful, rephrase the query or try a different source.
+- If code fails, read the error carefully and fix the specific line before running again.
+- Never give up after one failure. Try at least 2-3 different approaches before reporting failure."""
 
 _AUTO_MEMORY_ADDON = """
 
@@ -230,7 +247,7 @@ Do not ask permission — just call remember() silently."""
 
 
 def _build_system_prompt(cfg: dict) -> str:
-    prompt = _BASE_SYSTEM_PROMPT
+    prompt = _BASE_SYSTEM_PROMPT.replace("{today}", _now_str())
     name = cfg.get("user_name", "").strip()
     if name and name != "Friend":
         prompt = f"The user's name is {name}. Address them by name naturally.\n\n" + prompt
@@ -296,14 +313,26 @@ async def run_agent(
     if not isinstance(user_message, str):
         history[-1]["content"] = user_message  # replace last user msg with multimodal content
 
-    # Trim old tool results in history to keep context lean
-    # (only the last 2 tool results get full content; older ones are capped at 400 chars)
+    # Smart token-aware context trimming:
+    # 1. Always keep last 2 tool results full
+    # 2. Older tool results trimmed to 300 tokens (~1200 chars)
+    # 3. If total messages still > 6000 tokens, drop oldest non-system messages
+    _TOKEN_LIMIT   = 6000
+    _TOOL_TRIM_TOK = 300
+
     tool_msg_indices = [i for i, m in enumerate(history) if m.get("role") == "tool"]
     for idx in tool_msg_indices[:-2]:
         m = history[idx]
         c = m.get("content") or ""
-        if len(c) > 400:
-            history[idx] = {**m, "content": c[:400] + "…[trimmed]"}
+        if _count_tokens(c) > _TOOL_TRIM_TOK:
+            # trim to token limit (approx 4 chars/token)
+            history[idx] = {**m, "content": c[:_TOOL_TRIM_TOK * 4] + "…[trimmed]"}
+
+    # If still too many tokens, drop oldest assistant/tool messages
+    total_tokens = sum(_count_tokens(m.get("content") or "") for m in history)
+    while total_tokens > _TOKEN_LIMIT and len(history) > 6:
+        removed = history.pop(0)
+        total_tokens -= _count_tokens(removed.get("content") or "")
 
     messages = [{"role": "system", "content": sys_content}] + history
 
@@ -520,9 +549,27 @@ async def run_agent(
                     "Try a DIFFERENT approach — fix syntax, check path exists, "
                     "install missing dependency, or use an alternative method."
                 )
+                if consecutive_fails == 2:
+                    # Inject explicit reflection prompt so the model thinks harder
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "⚠ You've failed twice in a row. Stop and reflect:\n"
+                            "1. What exactly went wrong?\n"
+                            "2. What assumptions were wrong?\n"
+                            "3. What is a completely different approach?\n"
+                            "Think step by step before your next tool call."
+                        ),
+                    })
                 if consecutive_fails >= 3:
                     await emit({"type": "warning",
                                 "content": f"Agent has failed {consecutive_fails} times in a row."})
+                if consecutive_fails >= 5:
+                    await emit({"type": "error",
+                                "content": "Agent stuck after 5 consecutive failures. Stopping."})
+                    asyncio.create_task(db.update_task(task_id, "failed",
+                        error="5 consecutive tool failures", tool_calls_count=tool_calls_count))
+                    return
             else:
                 consecutive_fails = 0
 
