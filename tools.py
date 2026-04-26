@@ -881,6 +881,29 @@ async def open_app(name: str, _send=None) -> dict:
                 "telegram": "telegram",
             }
             cmd = aliases.get(name.lower().strip(), name)
+            # Special handling for apps not reliably in PATH
+            special = {
+                "spotify": [
+                    os.path.expandvars(r"%APPDATA%\Spotify\Spotify.exe"),
+                    "explorer.exe shell:AppsFolder\\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+                ],
+                "whatsapp": [
+                    "explorer.exe shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!WhatsApp",
+                ],
+                "telegram": [
+                    os.path.expandvars(r"%APPDATA%\Telegram Desktop\Telegram.exe"),
+                ],
+            }
+            if cmd.lower() in special:
+                for attempt in special[cmd.lower()]:
+                    try:
+                        if os.path.isfile(attempt):
+                            subprocess.Popen([attempt], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        else:
+                            subprocess.Popen(attempt, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        return f"Launched: {name}"
+                    except Exception:
+                        continue
             try:
                 if cmd.startswith("ms-"):
                     import os
@@ -1022,7 +1045,15 @@ async def desktop_vision(question: str = "What is on screen?", _send=None) -> di
         return {"output": f"**Vision ({w}×{h}):** {answer}", "image_path": img_path}
 
     except Exception as exc:
-        return {"output": f"desktop_vision error: {exc}", "image_path": None}
+        return {
+            "output": (
+                f"VISION UNAVAILABLE — cannot see screen: {exc}\n\n"
+                "⚠ DO NOT attempt to click at guessed coordinates. "
+                "Report to the user that desktop vision is temporarily unavailable (models rate-limited) "
+                "and ask them to try again in a minute."
+            ),
+            "image_path": None,
+        }
 
 
 async def desktop_double_click(x: int, y: int, _send=None) -> dict:
@@ -1121,29 +1152,35 @@ async def computer_use(task: str, max_steps: int = 10, _send=None) -> dict:
                              "action": f"Step {step+1}: analyzing screen", "image_path": img_path})
 
             # Ask vision model what action to take
-            decision = (await _vision_call(client, [{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                    {"type": "text", "text": (
-                        f"Task: {task}\n"
-                        f"Step: {step+1} of max {max_steps}\n"
-                        f"Previous steps: {'; '.join(step_log) or 'none'}\n"
-                        f"Screen: {w}×{h}px\n\n"
-                        "Look at the screenshot and decide the NEXT single action to take.\n"
-                        "Reply with EXACTLY ONE of these formats:\n"
-                        "  CLICK x,y — click at coordinates\n"
-                        "  DOUBLE_CLICK x,y — double click\n"
-                        "  RIGHT_CLICK x,y — right click\n"
-                        "  TYPE text — type this text (use after clicking a text field)\n"
-                        "  HOTKEY keys — press shortcut (e.g. ctrl+c, win+r, alt+f4)\n"
-                        "  OPEN app_name — open an application\n"
-                        "  WAIT — wait 1 second (use if loading)\n"
-                        "  DONE: result — task is complete, describe result\n\n"
-                        "Be precise with coordinates. Describe what you see first, then the action."
-                    )},
-                ]
-            }], timeout=30)).strip()
+            try:
+                decision = (await _vision_call(client, [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        {"type": "text", "text": (
+                            f"Task: {task}\n"
+                            f"Step: {step+1} of max {max_steps}\n"
+                            f"Previous steps: {'; '.join(step_log) or 'none'}\n"
+                            f"Screen: {w}×{h}px\n\n"
+                            "Look at the screenshot and decide the NEXT single action to take.\n"
+                            "Reply with EXACTLY ONE of these formats:\n"
+                            "  CLICK x,y — click at coordinates\n"
+                            "  DOUBLE_CLICK x,y — double click\n"
+                            "  RIGHT_CLICK x,y — right click\n"
+                            "  TYPE text — type this text (use after clicking a text field)\n"
+                            "  HOTKEY keys — press shortcut (e.g. ctrl+c, win+r, alt+f4)\n"
+                            "  OPEN app_name — open an application\n"
+                            "  WAIT — wait 1 second (use if loading)\n"
+                            "  DONE: result — task is complete, describe result\n\n"
+                            "Be precise with coordinates. Describe what you see first, then the action."
+                        )},
+                    ]
+                }], timeout=30)).strip()
+            except Exception as ve:
+                return {
+                    "output": f"computer_use aborted — vision unavailable: {ve}. Do not guess coordinates. Ask user to retry in a minute.",
+                    "image_path": img_path,
+                }
             step_log.append(f"Step {step+1}: {decision[:80]}")
 
             # Parse and execute
