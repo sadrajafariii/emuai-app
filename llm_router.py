@@ -29,7 +29,6 @@ MODELS = [
     "google/gemma-3-27b-it:free",                   # Gemma 3 27B
     "google/gemma-3-12b-it:free",                   # Gemma 3 12B
     "meta-llama/llama-3.3-70b-instruct:free",       # Llama 3.3 70B
-    "openrouter/auto",                              # Final fallback
 ]
 
 COOLDOWN_SECONDS = 60
