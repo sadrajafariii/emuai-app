@@ -1332,6 +1332,7 @@ function handleEvent(ev) {
     case 'tts_speak':        ttsSpeak(ev.text); break;
     case 'extension_status': updateExtensionStatus(ev.connected); break;
     case 'error':            renderError(ev.content); break;
+    case 'stopped':          finalizeMessage(null); setStatus('Stopped', false); break;
   }
 }
 
@@ -1556,7 +1557,8 @@ function sendMessage() {
 function stopAgent() {
   if (!currentSessionId) return;
   ws.send(JSON.stringify({ type: 'stop', session_id: currentSessionId }));
-  _agentDone();
+  finalizeMessage(null);
+  setStatus('Stopping…', false);
 }
 
 function handleKey(e) {

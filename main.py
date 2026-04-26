@@ -967,7 +967,17 @@ async def websocket_endpoint(ws: WebSocket):
                 if not sid or not content:
                     await send({"type": "error", "content": "session_id and content required"})
                     continue
-                task = asyncio.create_task(run_agent(sid, content, send, user_id=user_id))
+                async def _run_and_handle_cancel(_sid=sid, _content=content, _send=send, _uid=user_id):
+                    try:
+                        await run_agent(_sid, _content, _send, user_id=_uid)
+                    except asyncio.CancelledError:
+                        try:
+                            await _send({"session_id": _sid, "type": "stopped"})
+                        except Exception:
+                            pass
+                        raise
+
+                task = asyncio.create_task(_run_and_handle_cancel())
                 _active_tasks[sid] = task
 
                 async def _refresh():
