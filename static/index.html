@@ -1430,19 +1430,17 @@ function clearChat() {
 function appendUserMessage(text) {
   document.getElementById('welcome').style.display = 'none';
   const el = document.createElement('div');
-  el.className = 'flex justify-end fade-in group';
+  el.className = 'flex items-end justify-end gap-1.5 fade-in group';
   el.innerHTML = `
-    <div class="flex flex-col items-end gap-1 max-w-lg">
-      <div class="px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed text-cream" style="background:#1e1b17;border:1px solid #2a2520;">${escHtml(text).replace(/\n/g,'<br/>')}</div>
-      <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onclick="copyText(this,${JSON.stringify(text)})" class="msg-action-btn" title="Copy">
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
-        </button>
-        <button onclick="retryMessage(${JSON.stringify(text)})" class="msg-action-btn" title="Retry">
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/><path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 7.757 2.997a.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/></svg>
-        </button>
-      </div>
-    </div>`;
+    <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pb-0.5">
+      <button onclick="copyText(this,${JSON.stringify(text)})" class="msg-action-btn" title="Copy">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
+      </button>
+      <button onclick="retryMessage(${JSON.stringify(text)})" class="msg-action-btn" title="Retry">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/><path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 7.757 2.997a.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/></svg>
+      </button>
+    </div>
+    <div class="max-w-lg px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed text-cream" style="background:#1e1b17;border:1px solid #2a2520;">${escHtml(text).replace(/\n/g,'<br/>')}</div>`;
   document.getElementById('chat-messages').appendChild(el);
   scrollChat();
 }
@@ -1473,13 +1471,15 @@ function appendToken(token) {
   if (!pendingAssistantEl) {
     pendingContent = '';
     const wrapper = document.createElement('div');
-    wrapper.className = 'flex gap-3 fade-in';
+    wrapper.className = 'flex gap-3 fade-in group';
     const id = 'streaming-' + Date.now();
     wrapper.innerHTML = `
       <div class="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5 overflow-hidden" style="border:1px solid #2a2520;">
         <img src="/static/logo.svg" alt="bud" class="w-full h-full"/>
       </div>
-      <div class="flex-1 prose text-sm text-cream max-w-2xl" id="${id}"></div>`;
+      <div class="flex-1 min-w-0">
+        <div class="prose text-sm text-cream max-w-2xl" id="${id}"></div>
+      </div>`;
     document.getElementById('chat-messages').appendChild(wrapper);
     pendingAssistantEl = document.getElementById(id);
     document.getElementById('welcome').style.display = 'none';
@@ -1504,18 +1504,15 @@ function finalizeMessage(tokenUsage) {
         pb.classList.add('text-faint','hover:text-muted','hover:border-borderl');
       }
     }
-    // Add copy button row below streamed message
+    // Add copy button inside the content wrapper (sibling of prose div)
     const captured = pendingContent;
     const btnRow = document.createElement('div');
     btnRow.className = 'flex gap-0.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity';
     btnRow.innerHTML = `<button class="msg-action-btn" title="Copy"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg></button>`;
     btnRow.querySelector('button').onclick = function() { copyText(this, captured); };
-    // Insert after the prose div (pendingAssistantEl's parent flex container)
-    const parent = pendingAssistantEl.parentElement;
-    if (parent) parent.appendChild(btnRow);
-    // Make the outer row a group so hover works
-    const outer = parent?.parentElement;
-    if (outer && !outer.classList.contains('group')) outer.classList.add('group');
+    // pendingAssistantEl is the prose div; its parent is the flex-1 min-w-0 content wrapper
+    const contentWrapper = pendingAssistantEl.parentElement;
+    if (contentWrapper) contentWrapper.appendChild(btnRow);
     pendingAssistantEl = null;
     pendingContent = '';
   }
