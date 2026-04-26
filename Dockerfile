@@ -19,7 +19,9 @@ RUN pip install --no-cache-dir \
     yt-dlp youtube-transcript-api openai \
     faster-whisper playwright \
     "python-jose[cryptography]" "passlib[bcrypt]" "bcrypt<4.0.0" \
-    "qrcode[pil]" markdown cryptography tiktoken
+    "qrcode[pil]" markdown cryptography tiktoken \
+    python-docx python-pptx openpyxl pyyaml \
+    google-api-python-client google-auth google-auth-oauthlib
 RUN pip install --no-cache-dir apscheduler sqlalchemy
 RUN playwright install chromium --with-deps
 

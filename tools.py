@@ -1459,6 +1459,305 @@ async def browser_vision(question: str = "What is on this page? Describe all vis
         return {"output": f"Vision error: {exc}", "image_path": None}
 
 
+# ── tool: document reader (DOCX / PPTX / XLSX) ───────────────────────────────
+
+async def read_document(path: str) -> dict:
+    """Read DOCX, PPTX, or XLSX files and extract their text content."""
+    try:
+        p = Path(path).expanduser().resolve()
+        # also check workspace
+        if not p.exists():
+            p = _safe_path(path)
+        if not p.exists():
+            return {"output": f"File not found: {path}", "image_path": None}
+
+        ext = p.suffix.lower()
+        loop = asyncio.get_event_loop()
+
+        if ext == ".docx":
+            def _read_docx():
+                import docx
+                doc = docx.Document(str(p))
+                paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
+                tables_text = []
+                for table in doc.tables:
+                    for row in table.rows:
+                        tables_text.append(" | ".join(cell.text.strip() for cell in row.cells))
+                return "\n".join(paragraphs) + ("\n\nTables:\n" + "\n".join(tables_text) if tables_text else "")
+            text = await loop.run_in_executor(None, _read_docx)
+            return {"output": f"**{p.name}** (Word Document, {len(text):,} chars):\n\n{text[:12000]}", "image_path": None}
+
+        elif ext == ".pptx":
+            def _read_pptx():
+                from pptx import Presentation
+                prs = Presentation(str(p))
+                slides_text = []
+                for i, slide in enumerate(prs.slides, 1):
+                    parts = [f"--- Slide {i} ---"]
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text.strip():
+                            parts.append(shape.text.strip())
+                    slides_text.append("\n".join(parts))
+                return "\n\n".join(slides_text)
+            text = await loop.run_in_executor(None, _read_pptx)
+            return {"output": f"**{p.name}** (PowerPoint, {len(prs.slides)} slides):\n\n{text[:12000]}", "image_path": None}
+
+        elif ext in (".xlsx", ".xls"):
+            def _read_xlsx():
+                import openpyxl
+                wb = openpyxl.load_workbook(str(p), read_only=True, data_only=True)
+                sheets_text = []
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    rows = []
+                    for row in ws.iter_rows(max_row=200, values_only=True):
+                        cells = [str(c) if c is not None else "" for c in row]
+                        if any(c.strip() for c in cells):
+                            rows.append(" | ".join(cells))
+                    if rows:
+                        sheets_text.append(f"Sheet: {sheet_name}\n" + "\n".join(rows))
+                return "\n\n".join(sheets_text)
+            text = await loop.run_in_executor(None, _read_xlsx)
+            return {"output": f"**{p.name}** (Excel Spreadsheet):\n\n{text[:12000]}", "image_path": None}
+
+        else:
+            return {"output": f"Unsupported format '{ext}'. Supported: .docx, .pptx, .xlsx, .xls", "image_path": None}
+
+    except ImportError as e:
+        pkg = str(e).split("'")[1] if "'" in str(e) else str(e)
+        return {"output": f"Missing package: {pkg}. Run: pip install python-docx python-pptx openpyxl", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Document read error: {exc}", "image_path": None}
+
+
+# ── tool: OpenAPI / REST API discoverer ───────────────────────────────────────
+
+async def api_discover(spec_url: str, call_endpoint: str = "", method: str = "GET",
+                       params: dict = None, body: dict = None, base_url: str = "") -> dict:
+    """
+    Fetch an OpenAPI/Swagger spec and list all endpoints with descriptions.
+    Optionally call a specific endpoint from the spec.
+    spec_url: URL or workspace path to the OpenAPI JSON/YAML spec.
+    call_endpoint: if provided, call this path from the spec (e.g. /users).
+    """
+    try:
+        import yaml as _yaml
+    except ImportError:
+        _yaml = None
+
+    try:
+        # Fetch or read the spec
+        if spec_url.startswith("http"):
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.get(spec_url)
+                raw = r.text
+        else:
+            raw = _safe_path(spec_url).read_text(encoding="utf-8")
+
+        # Parse JSON or YAML
+        try:
+            spec = json.loads(raw)
+        except json.JSONDecodeError:
+            if _yaml:
+                spec = _yaml.safe_load(raw)
+            else:
+                return {"output": "Spec is YAML but PyYAML not installed. Run: pip install pyyaml", "image_path": None}
+
+        # Extract base URL
+        if not base_url:
+            servers = spec.get("servers", [])
+            base_url = servers[0].get("url", "") if servers else ""
+            # OpenAPI 2.x
+            if not base_url:
+                host = spec.get("host", "")
+                scheme = (spec.get("schemes") or ["https"])[0]
+                base_path = spec.get("basePath", "")
+                if host:
+                    base_url = f"{scheme}://{host}{base_path}"
+
+        paths = spec.get("paths", {})
+        info = spec.get("info", {})
+
+        # Build endpoint list
+        endpoint_lines = [
+            f"# {info.get('title', 'API')} v{info.get('version', '?')}",
+            f"Base URL: {base_url or '(not found)'}",
+            f"Endpoints ({len(paths)}):\n",
+        ]
+        for path, methods_obj in list(paths.items())[:50]:
+            for m, details in methods_obj.items():
+                if m in ("get", "post", "put", "patch", "delete"):
+                    summary = details.get("summary") or details.get("description") or ""
+                    endpoint_lines.append(f"  {m.upper():7} {path}  — {summary[:80]}")
+
+        if not call_endpoint:
+            return {"output": "\n".join(endpoint_lines), "image_path": None}
+
+        # Call a specific endpoint
+        target_url = base_url.rstrip("/") + "/" + call_endpoint.lstrip("/")
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.request(
+                method.upper(), target_url,
+                params=params or {},
+                json=body if body else None,
+            )
+        try:
+            body_out = json.dumps(resp.json(), indent=2)[:4000]
+        except Exception:
+            body_out = resp.text[:4000]
+        return {
+            "output": f"{method.upper()} {target_url}\nStatus: {resp.status_code}\n\n{body_out}",
+            "image_path": None,
+        }
+
+    except Exception as exc:
+        return {"output": f"API discover error: {exc}", "image_path": None}
+
+
+# ── tool: meeting notes ────────────────────────────────────────────────────────
+
+async def meeting_notes(transcript: str, style: str = "full") -> dict:
+    """
+    Generate structured meeting notes from a transcript.
+    style: full (default) | brief | action_only
+    Produces: summary, decisions made, action items with owners, open questions.
+    """
+    try:
+        import llm_router as _lr
+        import settings_store as _ss, os
+
+        style_instructions = {
+            "full": (
+                "Produce comprehensive meeting notes with: "
+                "1) One-paragraph executive summary "
+                "2) Key decisions made (bulleted) "
+                "3) Action items with owner names and deadlines if mentioned "
+                "4) Open questions / blockers "
+                "5) Next meeting topic if mentioned"
+            ),
+            "brief": (
+                "Produce brief meeting notes with: "
+                "1) 2-sentence summary "
+                "2) Action items only (owner: task format)"
+            ),
+            "action_only": (
+                "Extract ONLY the action items from the meeting. "
+                "Format: - [Owner] Task description (deadline if mentioned)"
+            ),
+        }.get(style, "full")
+
+        messages = [
+            {"role": "system", "content": (
+                f"You are a professional meeting notes writer. {style_instructions}. "
+                "Be specific, use names from the transcript, format clearly in Markdown."
+            )},
+            {"role": "user", "content": f"Meeting transcript:\n\n{transcript[:8000]}"},
+        ]
+
+        result = await _lr.chat_completion(messages, tools=[])
+        notes = result["response"].choices[0].message.content or "Could not generate notes."
+        return {"output": f"## Meeting Notes\n\n{notes}", "image_path": None}
+
+    except Exception as exc:
+        return {"output": f"Meeting notes error: {exc}", "image_path": None}
+
+
+# ── tool: Google Calendar ─────────────────────────────────────────────────────
+
+def _get_gcal_service():
+    """Build a Google Calendar API service from credentials in environment."""
+    creds_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "")
+    if not creds_path or not Path(creds_path).exists():
+        raise RuntimeError(
+            "Google Calendar not configured. "
+            "Set GOOGLE_CREDENTIALS_PATH in .env pointing to your service account or OAuth credentials JSON. "
+            "See: https://developers.google.com/calendar/api/quickstart/python"
+        )
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        SCOPES = ["https://www.googleapis.com/auth/calendar"]
+        creds = service_account.Credentials.from_service_account_file(creds_path, scopes=SCOPES)
+        return build("calendar", "v3", credentials=creds)
+    except ImportError:
+        raise RuntimeError("google-api-python-client not installed. Run: pip install google-api-python-client google-auth")
+
+
+async def calendar_list(days: int = 7, calendar_id: str = "primary") -> dict:
+    """List upcoming calendar events for the next N days."""
+    try:
+        from datetime import timezone, timedelta
+        loop = asyncio.get_event_loop()
+
+        def _fetch():
+            service = _get_gcal_service()
+            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            end = now + timedelta(days=days)
+            events_result = service.events().list(
+                calendarId=calendar_id,
+                timeMin=now.isoformat(),
+                timeMax=end.isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=20,
+            ).execute()
+            return events_result.get("items", [])
+
+        events = await loop.run_in_executor(None, _fetch)
+        if not events:
+            return {"output": f"No events in the next {days} days.", "image_path": None}
+
+        lines = [f"**Upcoming events (next {days} days):**\n"]
+        for ev in events:
+            start = ev["start"].get("dateTime") or ev["start"].get("date", "")
+            title = ev.get("summary", "(no title)")
+            location = ev.get("location", "")
+            loc_str = f" @ {location}" if location else ""
+            lines.append(f"• **{title}**{loc_str} — {start[:16].replace('T', ' ')}")
+        return {"output": "\n".join(lines), "image_path": None}
+
+    except RuntimeError as e:
+        return {"output": str(e), "image_path": None}
+    except Exception as exc:
+        return {"output": f"Calendar list error: {exc}", "image_path": None}
+
+
+async def calendar_create_event(
+    summary: str,
+    start: str,
+    end: str,
+    description: str = "",
+    location: str = "",
+    calendar_id: str = "primary",
+) -> dict:
+    """
+    Create a Google Calendar event.
+    start / end format: 'YYYY-MM-DDTHH:MM:SS' (local time, e.g. '2026-05-01T14:00:00')
+    """
+    try:
+        loop = asyncio.get_event_loop()
+
+        def _create():
+            service = _get_gcal_service()
+            event = {
+                "summary": summary,
+                "description": description,
+                "location": location,
+                "start": {"dateTime": start, "timeZone": "UTC"},
+                "end":   {"dateTime": end,   "timeZone": "UTC"},
+            }
+            return service.events().insert(calendarId=calendar_id, body=event).execute()
+
+        created = await loop.run_in_executor(None, _create)
+        link = created.get("htmlLink", "")
+        return {"output": f"Event created: **{summary}**\n{start} → {end}\n{link}", "image_path": None}
+
+    except RuntimeError as e:
+        return {"output": str(e), "image_path": None}
+    except Exception as exc:
+        return {"output": f"Calendar create error: {exc}", "image_path": None}
+
+
 # ── tool: planning ────────────────────────────────────────────────────────────
 
 async def make_plan(goal: str) -> dict:
@@ -2638,6 +2937,15 @@ TOOL_SCHEMAS = [
     {"type":"function","function":{"name":"browser_close_tab","description":"Close a browser tab by index.","parameters":{"type":"object","properties":{"index":{"type":"integer","description":"Tab index to close"}},"required":["index"]}}},
     # ── Vision ────────────────────────────────────────────────────────────────
     {"type":"function","function":{"name":"browser_vision","description":"Take a screenshot and use vision AI to understand what's on screen. Use when you need visual understanding of the page.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze in the screenshot"}},"required":[]}}},
+    # ── Document Reader ───────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"read_document","description":"Read DOCX, PPTX, or XLSX files and extract all text content. Supports Word documents, PowerPoint presentations, and Excel spreadsheets.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path (workspace-relative or absolute)"}},"required":["path"]}}},
+    # ── OpenAPI Discoverer ───────────────────────────────────────────────────
+    {"type":"function","function":{"name":"api_discover","description":"Fetch an OpenAPI/Swagger spec and list all available endpoints. Optionally call a specific endpoint. Use to understand and integrate with any REST API.","parameters":{"type":"object","properties":{"spec_url":{"type":"string","description":"URL or workspace path to the OpenAPI JSON/YAML spec"},"call_endpoint":{"type":"string","description":"Optional: endpoint path to call (e.g. /users)"},"method":{"type":"string","description":"HTTP method for the call (default: GET)"},"params":{"type":"object","description":"Query parameters for the call"},"body":{"type":"object","description":"Request body for POST/PUT calls"},"base_url":{"type":"string","description":"Override base URL (auto-detected from spec if not provided)"}},"required":["spec_url"]}}},
+    # ── Meeting Notes ────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"meeting_notes","description":"Generate structured meeting notes from a transcript. Extracts summary, decisions, action items with owners, and open questions.","parameters":{"type":"object","properties":{"transcript":{"type":"string","description":"The meeting transcript text"},"style":{"type":"string","description":"full (default) | brief | action_only"}},"required":["transcript"]}}},
+    # ── Google Calendar ───────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"calendar_list","description":"List upcoming Google Calendar events for the next N days. Requires GOOGLE_CREDENTIALS_PATH in .env.","parameters":{"type":"object","properties":{"days":{"type":"integer","description":"How many days ahead to look (default: 7)"},"calendar_id":{"type":"string","description":"Calendar ID (default: primary)"}},"required":[]}}},
+    {"type":"function","function":{"name":"calendar_create_event","description":"Create a Google Calendar event. Requires GOOGLE_CREDENTIALS_PATH in .env.","parameters":{"type":"object","properties":{"summary":{"type":"string","description":"Event title"},"start":{"type":"string","description":"Start datetime in ISO format: 2026-05-01T14:00:00"},"end":{"type":"string","description":"End datetime in ISO format: 2026-05-01T15:00:00"},"description":{"type":"string","description":"Event description (optional)"},"location":{"type":"string","description":"Event location (optional)"},"calendar_id":{"type":"string","description":"Calendar ID (default: primary)"}},"required":["summary","start","end"]}}},
     # ── Spawn Agent ───────────────────────────────────────────────────────────
     {"type":"function","function":{"name":"spawn_agent","description":"Spawn a focused sub-agent to accomplish a specific goal independently. Use for parallel research, verification, or specialized tasks.","parameters":{"type":"object","properties":{"goal":{"type":"string","description":"The specific goal for the sub-agent"},"tools_hint":{"type":"string","description":"Optional hint about which tools the sub-agent should use"}},"required":["goal"]}}},
     # ── Deep Research ─────────────────────────────────────────────────────────
@@ -2922,6 +3230,12 @@ TOOL_MAP = {
     "browser_switch_tab": browser_switch_tab,
     "browser_list_tabs":  browser_list_tabs,
     "browser_close_tab":  browser_close_tab,
+    # New tools
+    "read_document":        read_document,
+    "api_discover":         api_discover,
+    "meeting_notes":        meeting_notes,
+    "calendar_list":        calendar_list,
+    "calendar_create_event": calendar_create_event,
     # Vision + Planning + Research
     "browser_vision":  browser_vision,
     "make_plan":       make_plan,

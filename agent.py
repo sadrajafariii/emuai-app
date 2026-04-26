@@ -149,8 +149,19 @@ Requires EMAIL_ADDRESS + EMAIL_PASSWORD in .env
 ## Notifications
 - notify_desktop(title, message) — send a native desktop notification
 
-## PDF
+## PDF & Documents
 - read_pdf(path) — extract text from any PDF file
+- read_document(path) — extract text from Word (.docx), PowerPoint (.pptx), or Excel (.xlsx/.xls) files
+
+## API Integration
+- api_discover(spec_url) — fetch an OpenAPI/Swagger spec and list all endpoints; optionally call one directly
+
+## Meeting Intelligence
+- meeting_notes(transcript, style) — generate structured notes from a meeting transcript: summary, decisions, action items, open questions. style: full | brief | action_only
+
+## Google Calendar
+- calendar_list(days) — list upcoming calendar events (requires GOOGLE_CREDENTIALS_PATH in .env)
+- calendar_create_event(summary, start, end) — create a calendar event
 
 ## RAG Vault (document memory)
 - vault_add(content, title) — save a document/text to the searchable vault
