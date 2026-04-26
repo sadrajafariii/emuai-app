@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 import db
 import settings_store
-from agent import run_agent, resolve_permission, resolve_computer_access, reset_session_permissions, stop_agent, _active_tasks
+from agent import run_agent, resolve_permission, resolve_computer_access, resolve_login_resume, reset_session_permissions, stop_agent, _active_tasks
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, get_user_from_ws,
@@ -1100,6 +1100,12 @@ async def websocket_endpoint(ws: WebSocket):
                 granted = bool(data.get("granted", False))
                 if sid and tool:
                     resolve_permission(sid, tool, granted)
+
+            elif msg_type == "resume":
+                # User clicked Continue after signing in to a login wall
+                sid = data.get("session_id")
+                if sid:
+                    resolve_login_resume(sid)
 
             elif msg_type == "computer_access_response":
                 granted = bool(data.get("granted", False))

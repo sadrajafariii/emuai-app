@@ -1396,6 +1396,7 @@ function handleEvent(ev) {
   if (ev.type === 'history')          { renderHistory(ev.messages, ev.sessions); return; }
   if (ev.type === 'permission_request') { showPermissionModal(ev.session_id, ev.tool, ev.description); return; }
   if (ev.type === 'computer_access_request') { showComputerAccessModal(ev.description); return; }
+  if (ev.type === 'login_wall') { showLoginWallCard(ev.session_id || currentSessionId, ev.url, ev.title, ev.message); return; }
   if (ev.type === 'scheduled_task_done') {
     ws.send(JSON.stringify({ type: 'list_sessions' }));
     browserNotify('bud — Task Done', ev.task || 'Scheduled task completed');
@@ -1914,6 +1915,44 @@ function showComputerAccessModal(description) {
 function respondComputerAccess(granted) {
   document.getElementById('computer-access-modal').style.display = 'none';
   ws.send(JSON.stringify({ type: 'computer_access_response', granted }));
+}
+
+// ─── Login wall card ─────────────────────────────────────────────────────────
+function showLoginWallCard(sessionId, url, title, message) {
+  const feed = document.getElementById('activity-feed');
+  const cardId = 'login-wall-card-' + Date.now();
+  const safeTitle = escHtml(title || url || 'Sign-in page');
+  const safeMsg = message || 'Sign-in page detected. Please sign in and click <strong>Continue</strong> when ready.';
+  feed.insertAdjacentHTML('beforeend', `
+    <div id="${cardId}" class="tool-card" style="border:1px solid #c8a45e;background:#1a1610;">
+      <div class="tool-header" style="gap:.5rem;">
+        <span style="font-size:1.1rem;">🔐</span>
+        <span class="font-mono text-gold" style="font-size:.8rem;">Login wall detected</span>
+        <span class="ml-auto font-mono" style="font-size:.7rem;color:#7a6a55;">${safeTitle}</span>
+      </div>
+      <div class="result-area" style="color:#e4d8c4;font-size:.82rem;line-height:1.6;padding:.5rem 0;">
+        ${safeMsg}
+      </div>
+      <div style="padding:.5rem 0 .25rem;">
+        <button onclick="sendLoginResume('${sessionId}','${cardId}')"
+          style="background:#c8a45e;color:#0d0b08;border:none;border-radius:6px;padding:.4rem 1.1rem;font-size:.82rem;font-weight:700;cursor:pointer;">
+          Continue ▶
+        </button>
+      </div>
+    </div>
+  `);
+  feed.scrollTop = feed.scrollHeight;
+  setStatus('Waiting for sign-in…', true);
+}
+
+function sendLoginResume(sessionId, cardId) {
+  ws.send(JSON.stringify({ type: 'resume', session_id: sessionId }));
+  const card = document.getElementById(cardId);
+  if (card) {
+    card.querySelector('button').disabled = true;
+    card.querySelector('button').textContent = 'Resuming…';
+  }
+  setStatus('Resuming…', true);
 }
 
 // ─── Tool result ──────────────────────────────────────────────────────────────

@@ -61,6 +61,9 @@ _session_permissions: dict[str, set] = {}
 # Per-session pending permission futures: session_id -> {tool_name: Future}
 _pending_permissions: dict[str, dict[str, asyncio.Future]] = {}
 
+# Per-session pending login resume futures: session_id -> Future
+_pending_login_resumes: dict[str, asyncio.Future] = {}
+
 # Active agent tasks per session
 _active_tasks: dict[str, asyncio.Task] = {}
 
@@ -672,6 +675,23 @@ async def run_agent(
                 "app_url": app_url, "status": status,
             })
 
+            # Login wall: pause agent and wait for user to sign in
+            if tool_result.get("login_wall"):
+                login_fut: asyncio.Future = asyncio.get_event_loop().create_future()
+                _pending_login_resumes[session_id] = login_fut
+                await emit({
+                    "type": "login_wall",
+                    "url": tool_result.get("login_url", ""),
+                    "title": tool_result.get("login_title", ""),
+                    "message": "Sign-in page detected. Please sign in and click **Continue** when ready.",
+                })
+                try:
+                    await asyncio.wait_for(login_fut, timeout=300)  # 5 min to sign in
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    _pending_login_resumes.pop(session_id, None)
+
             # Cap tool output in LLM context (full output shown in UI, trimmed for LLM)
             ctx_text = output_text[:3000] + ("…[truncated]" if len(output_text) > 3000 else "")
 
@@ -731,6 +751,13 @@ def resolve_computer_access(user_id: str, granted: bool):
     fut = _pending_computer_access.get(user_id)
     if fut and not fut.done():
         fut.set_result(granted)
+
+
+def resolve_login_resume(session_id: str):
+    """Called when the user clicks Continue after signing in to a login wall."""
+    fut = _pending_login_resumes.get(session_id)
+    if fut and not fut.done():
+        fut.set_result(True)
 
 
 def resolve_permission(session_id: str, tool_name: str, granted: bool):

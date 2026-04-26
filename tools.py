@@ -1749,13 +1749,74 @@ async def workflow_run(workflow_name: str, _send=None) -> dict:
 
 # ── tool: browser control (persistent visible session) ────────────────────────
 
+# ── Login wall detection ──────────────────────────────────────────────────────
+
+_LOGIN_URL_PATTERNS = [
+    "login", "signin", "sign-in", "sign_in", "log-in", "log_in",
+    "auth", "oauth", "sso", "accounts.google.com", "login.microsoftonline.com",
+    "login.live.com", "appleid.apple.com", "facebook.com/login",
+    "twitter.com/i/flow/login", "x.com/i/flow/login",
+]
+_LOGIN_TITLE_WORDS = [
+    "sign in", "log in", "login", "sign up", "create account",
+    "register", "authenticate", "verify your", "welcome back",
+]
+_LOGIN_BODY_PHRASES = [
+    "sign in", "log in", "enter your password", "forgot password",
+    "create account", "sign up", "don't have an account",
+    "already have an account", "continue with google", "continue with apple",
+    "remember me", "keep me signed in",
+]
+
+def _detect_login_wall(url: str = "", title: str = "", body: str = "") -> bool:
+    url_l   = url.lower()
+    title_l = title.lower()
+    body_l  = (body or "")[:3000].lower()
+
+    if any(p in url_l for p in _LOGIN_URL_PATTERNS):
+        return True
+    if any(w in title_l for w in _LOGIN_TITLE_WORDS):
+        return True
+    # Need at least 2 body phrases to avoid false positives
+    body_hits = sum(1 for p in _LOGIN_BODY_PHRASES if p in body_l)
+    return body_hits >= 2
+
+
 async def browser_navigate(url: str, _send=None) -> dict:
     from browser_session import browser
-    return await browser.navigate(url, send=_send)
+    result = await browser.navigate(url, send=_send)
+    # Check for login wall after navigation
+    try:
+        page = browser._page
+        if page and not page.is_closed():
+            current_url = page.url or url
+            title = await page.title() or ""
+            body  = await page.evaluate("() => document.body?.innerText?.slice(0,2000) || ''") or ""
+            if _detect_login_wall(current_url, title, body):
+                result["login_wall"] = True
+                result["login_url"]  = current_url
+                result["login_title"] = title
+    except Exception:
+        pass
+    return result
 
 async def browser_screenshot(_send=None) -> dict:
     from browser_session import browser
-    return await browser.screenshot(send=_send)
+    result = await browser.screenshot(send=_send)
+    # Check for login wall after screenshot
+    try:
+        page = browser._page
+        if page and not page.is_closed():
+            current_url = page.url or ""
+            title = await page.title() or ""
+            body  = await page.evaluate("() => document.body?.innerText?.slice(0,2000) || ''") or ""
+            if _detect_login_wall(current_url, title, body):
+                result["login_wall"] = True
+                result["login_url"]  = current_url
+                result["login_title"] = title
+    except Exception:
+        pass
+    return result
 
 async def browser_click(selector: str, _send=None) -> dict:
     from browser_session import browser
