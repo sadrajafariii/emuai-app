@@ -487,6 +487,8 @@
       <div class="settings-nav-item" data-section="tasks" onclick="switchSettingsTab('tasks');loadTaskHistory()">Tasks</div>
       <div class="settings-nav-item" data-section="cost" onclick="switchSettingsTab('cost');loadCost()">Usage</div>
       <div class="settings-nav-item" data-section="secrets" onclick="switchSettingsTab('secrets');loadSecretsUI()">Secrets</div>
+      <div class="settings-nav-item" data-section="projects" onclick="switchSettingsTab('projects');loadProjects()">Projects</div>
+      <div class="settings-nav-item" data-section="prompts" onclick="switchSettingsTab('prompts');loadPrompts()">Prompts</div>
     </div>
 
     <!-- Content -->
@@ -804,6 +806,31 @@
         </div>
       </div>
 
+      <!-- Projects -->
+      <div class="settings-section" id="section-projects">
+        <p class="text-xs text-muted mb-4">Named workspaces. The agent loads the project context automatically when you switch to it.</p>
+        <div id="projects-list" class="space-y-2 mb-5"></div>
+        <div class="rounded-lg p-4" style="background:#0e0c0a;border:1px solid #2a2520;">
+          <p class="settings-label mb-3">New Project</p>
+          <input id="proj-name" class="settings-input mb-2" placeholder="Project name" />
+          <textarea id="proj-desc" class="settings-input mb-2" rows="2" placeholder="Description (optional)"></textarea>
+          <textarea id="proj-ctx" class="settings-input mb-3" rows="3" placeholder="Context injected into every message (e.g. tech stack, goals, constraints)"></textarea>
+          <button onclick="createProject()" class="settings-save-btn" style="margin-top:0;">Create Project</button>
+        </div>
+      </div>
+
+      <!-- Prompts -->
+      <div class="settings-section" id="section-prompts">
+        <p class="text-xs text-muted mb-4">Saved prompts. Click any to insert into the chat input instantly.</p>
+        <div id="prompts-list" class="space-y-2 mb-5"></div>
+        <div class="rounded-lg p-4" style="background:#0e0c0a;border:1px solid #2a2520;">
+          <p class="settings-label mb-3">Save Current Input as Prompt</p>
+          <input id="prompt-title" class="settings-input mb-2" placeholder="Prompt title" />
+          <textarea id="prompt-content" class="settings-input mb-3" rows="3" placeholder="Prompt text"></textarea>
+          <button onclick="savePrompt()" class="settings-save-btn" style="margin-top:0;">Save Prompt</button>
+        </div>
+      </div>
+
       <!-- Save -->
       <div class="mt-6 pt-5" style="border-top:1px solid #2a2520;">
         <button onclick="saveSettings()" class="settings-save-btn">Save Settings</button>
@@ -1026,6 +1053,19 @@
               onkeydown="handleKey(event)"
               oninput="onInputChange(event)"
             ></textarea>
+
+            <!-- Model picker -->
+            <div class="relative self-end mb-0.5" id="model-picker-wrap">
+              <button onclick="toggleModelPicker()" id="model-picker-btn"
+                class="flex items-center gap-1 px-1.5 py-1 rounded text-faint hover:text-muted transition-colors"
+                style="font-size:.65rem;font-family:'JetBrains Mono',monospace;max-width:110px;" title="Switch model">
+                <span id="model-picker-label" class="truncate">auto</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" fill="currentColor" viewBox="0 0 16 16"><path d="M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/></svg>
+              </button>
+              <div id="model-picker-menu" class="hidden absolute bottom-8 left-0 z-50 rounded-lg border border-borderl overflow-y-auto"
+                style="background:#1a1815;min-width:220px;max-height:280px;">
+              </div>
+            </div>
 
             <!-- Mic button -->
             <button id="mic-btn" onclick="toggleVoice()"
@@ -3356,6 +3396,287 @@ async function deleteSecretUI(name) {
     _activePersona = cfg.active_persona || null;
   } catch(e) {}
 })();
+
+// ─── Model picker ─────────────────────────────────────────────────────────────
+const _MODELS = [
+  {id:'auto',          label:'Auto (recommended)'},
+  {id:'z-ai/glm-4.5-air:free',               label:'GLM 4.5 Air'},
+  {id:'deepseek/deepseek-r1:free',            label:'DeepSeek R1'},
+  {id:'deepseek/deepseek-chat-v3-0324:free',  label:'DeepSeek V3'},
+  {id:'meta-llama/llama-4-maverick:free',     label:'Llama 4 Maverick'},
+  {id:'qwen/qwen3-235b-a22b:free',            label:'Qwen3 235B'},
+  {id:'qwen/qwen3-30b-a3b:free',              label:'Qwen3 30B'},
+  {id:'qwen/qwen3-8b:free',                   label:'Qwen3 8B'},
+  {id:'google/gemma-3-27b-it:free',           label:'Gemma 3 27B'},
+  {id:'meta-llama/llama-3.3-70b-instruct:free',label:'Llama 3.3 70B'},
+  {id:'nousresearch/hermes-3-llama-3.1-405b:free',label:'Hermes 3 405B'},
+];
+let _selectedModel = localStorage.getItem('bud_model') || 'auto';
+
+function buildModelMenu() {
+  const menu = document.getElementById('model-picker-menu');
+  if (!menu) return;
+  menu.innerHTML = _MODELS.map(m => `
+    <button onclick="setModelPref('${m.id}')"
+      class="w-full text-left px-3 py-2 text-xs transition-colors hover:bg-panelb"
+      style="color:${m.id===_selectedModel?'#c8a45e':'#8a7e6e'};">
+      ${m.id===_selectedModel?'✓ ':' \u00a0\u00a0'}${m.label}
+    </button>`).join('');
+  const lbl = document.getElementById('model-picker-label');
+  if (lbl) lbl.textContent = _MODELS.find(m=>m.id===_selectedModel)?.label.split(' ').slice(0,2).join(' ') || 'auto';
+}
+
+function toggleModelPicker() {
+  const menu = document.getElementById('model-picker-menu');
+  if (!menu) return;
+  if (menu.classList.contains('hidden')) {
+    buildModelMenu();
+    menu.classList.remove('hidden');
+    document.addEventListener('click', _closeModelPicker, {once:true, capture:true});
+  } else {
+    menu.classList.add('hidden');
+  }
+}
+
+function _closeModelPicker(e) {
+  const wrap = document.getElementById('model-picker-wrap');
+  if (wrap && wrap.contains(e.target)) return;
+  document.getElementById('model-picker-menu')?.classList.add('hidden');
+}
+
+async function setModelPref(modelId) {
+  _selectedModel = modelId;
+  localStorage.setItem('bud_model', modelId);
+  document.getElementById('model-picker-menu')?.classList.add('hidden');
+  const lbl = document.getElementById('model-picker-label');
+  if (lbl) lbl.textContent = _MODELS.find(m=>m.id===modelId)?.label.split(' ').slice(0,2).join(' ') || 'auto';
+  try {
+    await fetch('/api/settings', { method: 'POST',
+      headers: {'Content-Type':'application/json',...authHeaders()},
+      body: JSON.stringify({preferred_model: modelId === 'auto' ? '' : modelId})
+    });
+  } catch(e) {}
+}
+
+// init label on load
+document.addEventListener('DOMContentLoaded', () => {
+  const lbl = document.getElementById('model-picker-label');
+  if (lbl) lbl.textContent = _MODELS.find(m=>m.id===_selectedModel)?.label.split(' ').slice(0,2).join(' ') || 'auto';
+});
+
+// ─── code_output streaming (like stream_output but for run_code) ──────────────
+const _baseHandleEvent2 = handleEvent;
+handleEvent = function(ev) {
+  if (ev.session_id && ev.session_id !== currentSessionId) return;
+  if (ev.type === 'code_output') {
+    appendCodeOutputLine(ev.line);
+    return;
+  }
+  _baseHandleEvent2(ev);
+};
+
+let _codeOutCard = null;
+let _codeOutPre  = null;
+
+function appendCodeOutputLine(line) {
+  const feed = document.getElementById('activity-feed');
+  if (!_codeOutCard) {
+    _codeOutCard = document.createElement('div');
+    _codeOutCard.className = 'tool-card fade-in';
+    _codeOutCard.innerHTML = `
+      <div class="tool-header">
+        <span class="text-base">🐍</span>
+        <span class="text-xs font-mono text-gold">python output</span>
+        <div class="w-2 h-2 rounded-full bg-gold pulse ml-auto"></div>
+      </div>
+      <div class="tool-body open">
+        <pre class="code-output info" id="code-out-pre" style="max-height:300px;overflow-y:auto;white-space:pre-wrap;"></pre>
+      </div>`;
+    feed.querySelector('.text-center')?.remove();
+    feed.appendChild(_codeOutCard);
+    _codeOutPre = _codeOutCard.querySelector('#code-out-pre');
+  }
+  _codeOutPre.textContent += line + '\n';
+  _codeOutPre.scrollTop = _codeOutPre.scrollHeight;
+}
+
+const _prevFinalize2 = finalizeMessage;
+finalizeMessage = function(tu) {
+  _codeOutCard = null;
+  _codeOutPre  = null;
+  _prevFinalize2(tu);
+};
+
+// ─── Conversation branching ───────────────────────────────────────────────────
+async function branchFrom(messageIndex) {
+  if (!currentSessionId) return;
+  try {
+    const res = await fetch(`/api/sessions/${currentSessionId}/branch`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json',...authHeaders()},
+      body: JSON.stringify({at_index: messageIndex})
+    });
+    if (!res.ok) { alert('Branch failed'); return; }
+    const {session_id} = await res.json();
+    loadSession(session_id);
+  } catch(e) { alert('Branch failed: ' + e.message); }
+}
+
+// Inject branch button into message action rows
+const _origAppendUser = appendUserMessage;
+appendUserMessage = function(text, msgIndex) {
+  _origAppendUser(text);
+  // Add branch button to the last user message's action row
+  const msgs = document.getElementById('chat-messages');
+  const last = msgs?.querySelector('.group:last-child');
+  const btns = last?.querySelector('.flex.gap-0\\.5');
+  if (btns && msgIndex !== undefined) {
+    const b = document.createElement('button');
+    b.className = 'msg-action-btn'; b.title = 'Branch from here';
+    b.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M11.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5zm-2.25.75a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.492 2.492 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25z"/></svg>';
+    b.onclick = () => branchFrom(msgIndex);
+    btns.appendChild(b);
+  }
+};
+
+// ─── Projects ─────────────────────────────────────────────────────────────────
+let _activeProject = null;
+
+async function loadProjects() {
+  const el = document.getElementById('projects-list');
+  if (!el) return;
+  try {
+    const rows = await (await fetch('/api/projects', {headers: authHeaders()})).json();
+    if (!rows.length) { el.innerHTML = '<p class="text-xs text-faint">No projects yet.</p>'; return; }
+    el.innerHTML = rows.map(p => `
+      <div class="rounded-lg p-3 flex items-start justify-between gap-2" style="background:#0e0c0a;border:1px solid ${_activeProject===p.id?'#c8a45e55':'#2a2520'};">
+        <div class="flex-1 min-w-0 cursor-pointer" onclick="activateProject('${p.id}','${escHtml(p.name)}')">
+          <p class="text-sm text-cream font-medium">${escHtml(p.name)}</p>
+          ${p.description?`<p class="text-xs text-faint mt-0.5 truncate">${escHtml(p.description)}</p>`:''}
+          ${_activeProject===p.id?'<p class="text-xs mt-1" style="color:#c8a45e;">● Active</p>':''}
+        </div>
+        <button onclick="deleteProject('${p.id}')" class="text-xs text-faint hover:text-red-400 flex-shrink-0" title="Delete">✕</button>
+      </div>`).join('');
+  } catch(e) { el.innerHTML = '<p class="text-xs text-faint">Failed to load.</p>'; }
+}
+
+async function createProject() {
+  const name = document.getElementById('proj-name')?.value.trim();
+  const desc = document.getElementById('proj-desc')?.value.trim();
+  const ctx  = document.getElementById('proj-ctx')?.value.trim();
+  if (!name) { alert('Project name required'); return; }
+  try {
+    await fetch('/api/projects', {method:'POST',
+      headers:{'Content-Type':'application/json',...authHeaders()},
+      body: JSON.stringify({name, description:desc, context:ctx})});
+    document.getElementById('proj-name').value = '';
+    document.getElementById('proj-desc').value = '';
+    document.getElementById('proj-ctx').value  = '';
+    loadProjects();
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+async function deleteProject(id) {
+  if (!confirm('Delete this project?')) return;
+  await fetch(`/api/projects/${id}`, {method:'DELETE', headers: authHeaders()});
+  if (_activeProject === id) _activeProject = null;
+  loadProjects();
+}
+
+function activateProject(id, name) {
+  _activeProject = _activeProject === id ? null : id;
+  localStorage.setItem('bud_project', _activeProject || '');
+  loadProjects();
+  showToast(_activeProject ? `Project: ${name}` : 'No active project');
+}
+
+// ─── Prompts library ──────────────────────────────────────────────────────────
+async function loadPrompts() {
+  const el = document.getElementById('prompts-list');
+  if (!el) return;
+  try {
+    const rows = await (await fetch('/api/prompts', {headers: authHeaders()})).json();
+    if (!rows.length) { el.innerHTML = '<p class="text-xs text-faint">No saved prompts yet.</p>'; return; }
+    el.innerHTML = rows.map(p => `
+      <div class="rounded-lg p-3 flex items-start gap-2" style="background:#0e0c0a;border:1px solid #2a2520;">
+        <div class="flex-1 min-w-0 cursor-pointer" onclick="insertPrompt(${JSON.stringify(p.content)})">
+          <p class="text-sm text-cream">${escHtml(p.title)}</p>
+          <p class="text-xs text-faint mt-0.5 truncate">${escHtml(p.content.slice(0,80))}</p>
+        </div>
+        <button onclick="deletePrompt('${p.id}')" class="text-xs text-faint hover:text-red-400 flex-shrink-0 mt-0.5" title="Delete">✕</button>
+      </div>`).join('');
+  } catch(e) { el.innerHTML = '<p class="text-xs text-faint">Failed to load.</p>'; }
+}
+
+async function savePrompt() {
+  const title   = document.getElementById('prompt-title')?.value.trim();
+  const content = document.getElementById('prompt-content')?.value.trim()
+                  || document.getElementById('user-input')?.value.trim();
+  if (!title || !content) { alert('Title and content required'); return; }
+  try {
+    await fetch('/api/prompts', {method:'POST',
+      headers:{'Content-Type':'application/json',...authHeaders()},
+      body: JSON.stringify({title, content})});
+    document.getElementById('prompt-title').value   = '';
+    document.getElementById('prompt-content').value = '';
+    loadPrompts();
+    showToast('Prompt saved');
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+async function deletePrompt(id) {
+  await fetch(`/api/prompts/${id}`, {method:'DELETE', headers: authHeaders()});
+  loadPrompts();
+}
+
+function insertPrompt(content) {
+  const inp = document.getElementById('user-input');
+  if (inp) { inp.value = content; inp.focus(); }
+  closeSettings();
+}
+
+// ─── Voice hold-to-talk (mobile) ─────────────────────────────────────────────
+(function patchVoiceHoldToTalk() {
+  const btn = document.getElementById('mic-btn');
+  if (!btn) return;
+  let _holdTimer = null;
+  let _holding   = false;
+
+  btn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    _holding = false;
+    _holdTimer = setTimeout(() => {
+      _holding = true;
+      // start recording via existing toggleVoice if not already recording
+      if (!btn.classList.contains('recording')) toggleVoice();
+    }, 200);
+  }, {passive:false});
+
+  btn.addEventListener('touchend', e => {
+    e.preventDefault();
+    clearTimeout(_holdTimer);
+    if (_holding && btn.classList.contains('recording')) {
+      // stop and send
+      toggleVoice();
+    }
+    _holding = false;
+  }, {passive:false});
+})();
+
+// ─── Toast helper ─────────────────────────────────────────────────────────────
+function showToast(msg, duration=2500) {
+  let t = document.getElementById('_toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = '_toast';
+    t.style.cssText = 'position:fixed;bottom:5rem;left:50%;transform:translateX(-50%);background:#1e1b17;border:1px solid #2a2520;color:#c8a45e;font-size:.75rem;padding:.5rem 1rem;border-radius:8px;z-index:9999;pointer-events:none;transition:opacity .3s;font-family:inherit;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => { t.style.opacity = '0'; }, duration);
+}
 </script>
 </body>
 </html>

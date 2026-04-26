@@ -265,6 +265,35 @@ async def reorder_sessions(request_body: dict, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/sessions/{session_id}/branch")
+async def branch_session(session_id: str, request: Request):
+    """Create a new session branching from an existing one, copying messages up to a given index."""
+    try:
+        user = get_current_user(request)
+        uid = user["id"]
+    except Exception:
+        uid = None
+    body = await request.json()
+    up_to = body.get("up_to")  # message index (exclusive); None = copy all
+
+    msgs = await db.get_messages(session_id)
+    if up_to is not None:
+        msgs = msgs[:up_to]
+
+    sessions = await db.get_sessions()
+    orig_title = next((s["title"] for s in sessions if s["id"] == session_id), "Chat")
+    new_session = await db.create_session(user_id=uid)
+    await db.update_session_title(new_session["id"], f"{orig_title} (branch)")
+
+    for m in msgs:
+        role = m.get("role", "user")
+        content = m.get("content") or ""
+        if content:
+            await db.save_message(new_session["id"], role, content)
+
+    return JSONResponse({"ok": True, "session": new_session})
+
+
 @app.get("/api/export/{session_id}")
 async def export_session_markdown(session_id: str, format: str = "markdown"):
     msgs = await db.get_messages(session_id)
@@ -635,6 +664,53 @@ async def receive_webhook(token: str, request: Request):
 
     asyncio.create_task(run_agent(session["id"], prompt, _noop_send, user_id=hook["user_id"]))
     return JSONResponse({"ok": True, "session_id": session["id"]})
+
+
+# ── Projects ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/projects")
+async def get_projects(request: Request):
+    user = get_current_user(request)
+    return await db.list_projects(user["id"])
+
+@app.post("/api/projects")
+async def create_project(request: Request):
+    user = get_current_user(request)
+    body = await request.json()
+    return await db.create_project(user["id"], body["name"], body.get("description",""), body.get("context",""))
+
+@app.patch("/api/projects/{project_id}")
+async def update_project(project_id: str, request: Request):
+    user = get_current_user(request)
+    body = await request.json()
+    await db.update_project(project_id, user["id"], **body)
+    return {"ok": True}
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project(project_id: str, request: Request):
+    user = get_current_user(request)
+    await db.delete_project(project_id, user["id"])
+    return {"ok": True}
+
+
+# ── Prompts ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/prompts")
+async def get_prompts(request: Request):
+    user = get_current_user(request)
+    return await db.list_prompts(user["id"])
+
+@app.post("/api/prompts")
+async def create_prompt_ep(request: Request):
+    user = get_current_user(request)
+    body = await request.json()
+    return await db.create_prompt(user["id"], body["title"], body["content"])
+
+@app.delete("/api/prompts/{prompt_id}")
+async def delete_prompt_ep(prompt_id: str, request: Request):
+    user = get_current_user(request)
+    await db.delete_prompt(prompt_id, user["id"])
+    return {"ok": True}
 
 
 # ── Cost tracker ──────────────────────────────────────────────────────────────

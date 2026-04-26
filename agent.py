@@ -355,72 +355,72 @@ async def run_agent(
 
         # ── call LLM ──────────────────────────────────────────────────────────
         await emit({"type": "status", "content": "Thinking…"})
+
+        # Stream the LLM response token by token
+        content           = ""
+        thinking          = ""
+        tool_calls        = []
+        used_prompt_tools = False
+        prompt_tool_call  = None
+        model_used        = "unknown"
+        stream_error      = None
+
         try:
-            result = await llm_router.chat_completion(messages, tools=TOOL_SCHEMAS, user_cfg=cfg if user_id else None)
-        except RuntimeError as exc:
-            err = str(exc)
-            # Show a friendlier message and wait hint before giving up
-            if "exhausted" in err.lower():
-                await emit({"type": "warning", "content": "⏳ All free models are rate-limited right now. Wait 30-60s and try again, or send any message to retry."})
+            gen = llm_router.stream_chat_completion(
+                messages, tools=TOOL_SCHEMAS,
+                user_cfg=cfg if user_id else None
+            )
+            async for event in gen:
+                if isinstance(event, dict) and event.get("__done__"):
+                    if event.get("error"):
+                        stream_error = event["error"]
+                        break
+                    model_used        = event["model"]
+                    thinking          = event.get("thinking", "")
+                    content           = event.get("text", "")
+                    used_prompt_tools = event.get("used_prompt_tools", False)
+                    prompt_tool_call  = event.get("prompt_tool_call")
+                    # Build tool_calls list from streamed fragments
+                    for tc in event.get("tool_calls", []):
+                        try:
+                            args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                        except json.JSONDecodeError:
+                            args = {}
+                        tool_calls.append({
+                            "id":        tc.get("id") or f"tc_{iterations}_{tc.get('name','')}",
+                            "name":      tc["name"],
+                            "arguments": args,
+                        })
+                    if prompt_tool_call:
+                        tool_calls.append({
+                            "id":        f"ptc_{iterations}",
+                            "name":      prompt_tool_call["name"],
+                            "arguments": prompt_tool_call["arguments"],
+                        })
+                else:
+                    # Raw text chunk — forward to client
+                    await emit({"type": "token", "content": event})
+        except Exception as exc:
+            stream_error = str(exc)
+
+        if stream_error:
+            err = stream_error
+            if "exhausted" in err.lower() or "rate-limited" in err.lower():
+                await emit({"type": "warning", "content": "⏳ All free models are rate-limited right now. Wait 30-60 s and try again."})
             else:
                 await emit({"type": "error", "content": err})
             asyncio.create_task(db.update_task(task_id, "failed", error=err[:300], tool_calls_count=tool_calls_count))
             return
 
-        model_used  = result["model"]
-        thinking    = result.get("thinking", "")
-        token_usage = result.get("token_usage", {})
-
-        total_prompt_tokens     += token_usage.get("prompt", 0)
-        total_completion_tokens += token_usage.get("completion", 0)
+        token_usage = {"prompt": 0, "completion": 0, "total": 0}
 
         await emit({"type": "model_info", "model": model_used})
-
-        # Track LLM call in analytics + cost log
-        asyncio.create_task(db.track_event("llm", model=model_used, tokens=token_usage.get("total", 0), session_id=session_id))
+        asyncio.create_task(db.track_event("llm", model=model_used, tokens=0, session_id=session_id))
         if user_id:
-            asyncio.create_task(db.log_cost(
-                user_id, session_id, model_used,
-                token_usage.get("prompt", 0), token_usage.get("completion", 0),
-            ))
+            asyncio.create_task(db.log_cost(user_id, session_id, model_used, 0, 0))
 
-        await emit({
-            "type": "token_usage",
-            "prompt":     total_prompt_tokens,
-            "completion": total_completion_tokens,
-            "total":      total_prompt_tokens + total_completion_tokens,
-        })
-
-        # ── stream thinking if present ────────────────────────────────────────
         if thinking and cfg.get("show_thinking", True):
             await emit({"type": "thinking", "content": thinking})
-
-        response          = result["response"]
-        used_prompt_tools = result.get("used_prompt_tools", False)
-        prompt_tool_call  = result.get("prompt_tool_call")
-
-        choice  = response.choices[0]
-        msg     = choice.message
-        content = msg.content or ""
-
-        # ── determine tool calls ──────────────────────────────────────────────
-        tool_calls = []
-
-        if getattr(msg, "tool_calls", None):
-            for tc in msg.tool_calls:
-                try:
-                    args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
-                tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": args})
-
-        elif prompt_tool_call:
-            tool_calls.append({
-                "id": f"ptc_{iterations}",
-                "name": prompt_tool_call["name"],
-                "arguments": prompt_tool_call["arguments"],
-            })
-            content = re.sub(r"<tool_call>.*?</tool_call>", "", content, flags=re.DOTALL).strip()
 
         # ── final answer ──────────────────────────────────────────────────────
         if not tool_calls:
@@ -445,7 +445,7 @@ async def run_agent(
 
         # ── persist assistant tool-call message ───────────────────────────────
         if used_prompt_tools:
-            messages.append({"role": "assistant", "content": msg.content or ""})
+            messages.append({"role": "assistant", "content": content or ""})
         else:
             tc_payload = [
                 {"id": tc["id"], "type": "function",

@@ -537,3 +537,132 @@ async def chat_completion(
                 ) from exc
 
     raise RuntimeError("⏳ All free models are rate-limited. Wait 30–60 s and try again.")
+
+
+async def stream_chat_completion(
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    user_cfg: dict | None = None,
+):
+    """
+    Async generator for true token-by-token streaming.
+    Yields: str  (text chunks to emit to client)
+    Final yield: dict with key '__done__': True  plus result fields:
+        model, thinking, tool_calls (list of {id,name,arguments}),
+        used_prompt_tools, prompt_tool_call, token_usage
+    """
+    import settings_store
+    cfg = settings_store.load()
+    if user_cfg:
+        cfg = {**cfg, **user_cfg}
+
+    api_key   = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
+    or_client = _make_openrouter_client(api_key)
+
+    preferred  = cfg.get("preferred_model", "auto")
+    base_list  = MODELS if preferred in ("auto", "", None) else [preferred] + MODELS
+    task_type  = _detect_task_type(messages)
+    candidates = _build_model_order(base_list, task_type)
+
+    # Groq fast path
+    if cfg.get("groq_enabled"):
+        groq_key    = cfg.get("groq_api_key") or os.getenv("GROQ_API_KEY", "")
+        groq_model  = cfg.get("groq_model", "llama-3.3-70b-versatile")
+        groq_client = AsyncOpenAI(base_url="https://api.groq.com/openai/v1", api_key=groq_key or "missing")
+        try:
+            kwargs = {"model": groq_model, "messages": messages, "timeout": 30, "stream": True}
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+            stream = await groq_client.chat.completions.create(**kwargs)
+            full_text = ""
+            tc_map: dict[int, dict] = {}
+            async for chunk in stream:
+                if not chunk.choices: continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    full_text += delta.content
+                    yield delta.content
+                if getattr(delta, "tool_calls", None):
+                    for tc in delta.tool_calls:
+                        e = tc_map.setdefault(tc.index, {"id":"","name":"","arguments":""})
+                        if tc.id: e["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name: e["name"] += tc.function.name
+                            if tc.function.arguments: e["arguments"] += tc.function.arguments
+            thinking, clean = extract_thinking(full_text)
+            yield {"__done__": True, "model": f"groq/{groq_model}", "thinking": thinking,
+                   "text": clean, "tool_calls": list(tc_map.values()),
+                   "used_prompt_tools": False, "prompt_tool_call": None,
+                   "token_usage": {"prompt":0,"completion":0,"total":0}}
+            return
+        except Exception as exc:
+            logger.error("Groq stream error: %s — falling back", exc)
+
+    last_error = None
+    for model in candidates:
+        if not _is_available(model):
+            continue
+        use_prompt_tools = model in _NO_FUNCTION_CALLING
+        is_reasoning     = model in _REASONING_MODELS
+        try:
+            msgs = _inject_tool_prompt(messages, tools) if (tools and use_prompt_tools) else messages
+            kwargs: dict = {"model": model, "messages": msgs, "timeout": 20, "stream": True}
+            if tools and not use_prompt_tools:
+                kwargs["tools"]       = tools
+                kwargs["tool_choice"] = "auto"
+            if is_reasoning:
+                kwargs["max_tokens"] = 8000
+
+            t0     = time.time()
+            stream = await or_client.chat.completions.create(**kwargs)
+
+            full_text = ""
+            tc_map: dict[int, dict] = {}
+
+            async for chunk in stream:
+                if not chunk.choices: continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    full_text += delta.content
+                    yield delta.content
+                if getattr(delta, "tool_calls", None):
+                    for tc in delta.tool_calls:
+                        e = tc_map.setdefault(tc.index, {"id":"","name":"","arguments":""})
+                        if tc.id: e["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name: e["name"] += tc.function.name
+                            if tc.function.arguments: e["arguments"] += tc.function.arguments
+
+            _record_latency(model, time.time() - t0)
+
+            thinking, clean = extract_thinking(full_text)
+
+            # Prompt-tool call extraction (models without native FC)
+            prompt_tool_call = None
+            if use_prompt_tools and tools and not tc_map:
+                prompt_tool_call = _parse_prompt_tool_call(clean)
+                if prompt_tool_call:
+                    import re as _re
+                    clean = _re.sub(r"<tool_call>.*?</tool_call>", "", clean, flags=_re.DOTALL).strip()
+
+            if not clean and not tc_map and not prompt_tool_call:
+                logger.warning("⚠ %s streamed empty — trying next", model)
+                continue
+
+            logger.info("✓ stream %s complete", model)
+            yield {"__done__": True, "model": model, "thinking": thinking,
+                   "text": clean, "tool_calls": list(tc_map.values()),
+                   "used_prompt_tools": use_prompt_tools,
+                   "prompt_tool_call": prompt_tool_call,
+                   "token_usage": {"prompt":0,"completion":0,"total":0}}
+            return
+
+        except Exception as exc:
+            msg = str(exc)
+            if "429" in msg or "rate limit" in msg.lower(): _cooldown(model)
+            elif "502" in msg or "503" in msg or "provider" in msg.lower(): _cooldown(model, 30)
+            else: logger.warning("✗ stream %s: %s", model, exc)
+            last_error = exc
+
+    yield {"__done__": True, "error": str(last_error or "All models exhausted")}

@@ -150,6 +150,24 @@ async def init_db():
                 cost_usd REAL DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                context TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS prompts (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
         """)
 
         # FTS5 virtual tables for fast full-text memory/vault search
@@ -935,3 +953,72 @@ async def get_cost_summary(user_id: str) -> dict:
         "total_usd": round((total_row["total"] or 0), 6),
         "by_model": [dict(r) for r in rows],
     }
+
+
+# ── Projects ───────────────────────────────────────────────────────────────────
+
+async def create_project(user_id: str, name: str, description: str = "", context: str = "") -> dict:
+    pid = str(uuid.uuid4())[:8]
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO projects (id, user_id, name, description, context) VALUES (?,?,?,?,?)",
+            (pid, user_id, name, description, context)
+        )
+        await db.commit()
+    return {"id": pid, "name": name, "description": description, "context": context}
+
+async def list_projects(user_id: str) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id,name,description,context,created_at FROM projects WHERE user_id=? ORDER BY updated_at DESC",
+            (user_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+async def update_project(project_id: str, user_id: str, **kwargs) -> bool:
+    allowed = {"name","description","context"}
+    sets = ", ".join(f"{k}=?" for k in kwargs if k in allowed)
+    vals = [v for k,v in kwargs.items() if k in allowed]
+    if not sets: return False
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            f"UPDATE projects SET {sets}, updated_at=datetime('now') WHERE id=? AND user_id=?",
+            (*vals, project_id, user_id)
+        )
+        await db.commit()
+    return True
+
+async def delete_project(project_id: str, user_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM projects WHERE id=? AND user_id=?", (project_id, user_id))
+        await db.commit()
+
+
+# ── Prompts ────────────────────────────────────────────────────────────────────
+
+async def create_prompt(user_id: str, title: str, content: str) -> dict:
+    pid = str(uuid.uuid4())[:8]
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO prompts (id, user_id, title, content) VALUES (?,?,?,?)",
+            (pid, user_id, title, content)
+        )
+        await db.commit()
+    return {"id": pid, "title": title, "content": content}
+
+async def list_prompts(user_id: str) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id,title,content,created_at FROM prompts WHERE user_id=? ORDER BY created_at DESC",
+            (user_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+async def delete_prompt(prompt_id: str, user_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM prompts WHERE id=? AND user_id=?", (prompt_id, user_id))
+        await db.commit()

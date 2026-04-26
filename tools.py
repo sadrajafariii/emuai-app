@@ -300,13 +300,13 @@ async def _interact_with_screenshots(page, task: str, send) -> str:
 
 # ── tool: run_code ────────────────────────────────────────────────────────────
 
-async def run_code(language: str, code: str) -> dict:
+async def run_code(language: str, code: str, _send=None) -> dict:
     lang = language.lower().strip()
     try:
         return await _run_in_docker(lang, code)
     except Exception as docker_exc:
         logger.warning("Docker exec failed (%s), falling back to subprocess", docker_exc)
-        return await _run_subprocess(lang, code)
+        return await _run_subprocess(lang, code, send=_send)
 
 
 async def _run_in_docker(language: str, code: str) -> dict:
@@ -351,9 +351,11 @@ async def _run_in_docker(language: str, code: str) -> dict:
         return {"output": f"Code execution timed out after {CODE_TIMEOUT}s", "image_path": None}
 
 
-async def _run_subprocess(language: str, code: str) -> dict:
+async def _run_subprocess(language: str, code: str, send=None) -> dict:
+    import sys as _sys
+
     cmds = {
-        "python": ["python", "-c", code],
+        "python": [_sys.executable, "-c", code],
         "js": ["node", "-e", code],
         "javascript": ["node", "-e", code],
         "bash": ["bash", "-c", code],
@@ -364,25 +366,28 @@ async def _run_subprocess(language: str, code: str) -> dict:
 
     cmd = cmds[language]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, cwd=str(WORKSPACE),
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=CODE_TIMEOUT)
-        except asyncio.TimeoutError:
-            proc.kill()
-            return {"output": f"Code execution timed out after {CODE_TIMEOUT}s", "image_path": None}
-
-        out = stdout.decode("utf-8", errors="replace")
-        err = stderr.decode("utf-8", errors="replace")
-        combined = ""
-        if out:
-            combined += out
-        if err:
-            combined += f"\n[stderr]\n{err}"
-        return {"output": f"[subprocess/{language}]\n{combined.strip()}", "image_path": None}
+        output_lines = []
+        if send:
+            await send({"type": "code_output", "line": "```"})
+        loop = asyncio.get_event_loop()
+        while True:
+            line = await loop.run_in_executor(None, proc.stdout.readline)
+            if not line:
+                break
+            output_lines.append(line)
+            if send:
+                await send({"type": "code_output", "line": line.rstrip()})
+        proc.wait()
+        if send:
+            await send({"type": "code_output", "line": "```"})
+        output = "".join(output_lines)
+        return {"output": f"[subprocess/{language}]\n{output.strip()}", "image_path": None}
     except FileNotFoundError:
         return {"output": f"Runtime '{cmd[0]}' not found. Install it to run {language}.", "image_path": None}
 
@@ -2059,6 +2064,27 @@ async def count_words(text: str) -> dict:
 
 # ── tool registry ─────────────────────────────────────────────────────────────
 
+async def spawn_agent(goal: str, tools_hint: str = "", send=None) -> dict:
+    """Spawn a sub-agent to accomplish a focused goal in parallel."""
+    import llm_router as _lr
+    messages = [
+        {"role": "system", "content": (
+            "You are a focused sub-agent. Accomplish the given goal using available tools. "
+            "Be concise. Return only the final result, no preamble."
+        )},
+        {"role": "user", "content": goal},
+    ]
+    try:
+        result = await _lr.chat_completion(messages)
+        answer = result["response"].choices[0].message.content or ""
+        if send:
+            await send({"type": "tool_result", "tool": "spawn_agent",
+                        "output": f"Sub-agent result:\n{answer}", "status": "info"})
+        return {"output": f"Sub-agent completed:\n{answer}"}
+    except Exception as exc:
+        return {"output": f"Sub-agent failed: {exc}"}
+
+
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -2612,6 +2638,8 @@ TOOL_SCHEMAS = [
     {"type":"function","function":{"name":"browser_close_tab","description":"Close a browser tab by index.","parameters":{"type":"object","properties":{"index":{"type":"integer","description":"Tab index to close"}},"required":["index"]}}},
     # ── Vision ────────────────────────────────────────────────────────────────
     {"type":"function","function":{"name":"browser_vision","description":"Take a screenshot and use vision AI to understand what's on screen. Use when you need visual understanding of the page.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze in the screenshot"}},"required":[]}}},
+    # ── Spawn Agent ───────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"spawn_agent","description":"Spawn a focused sub-agent to accomplish a specific goal independently. Use for parallel research, verification, or specialized tasks.","parameters":{"type":"object","properties":{"goal":{"type":"string","description":"The specific goal for the sub-agent"},"tools_hint":{"type":"string","description":"Optional hint about which tools the sub-agent should use"}},"required":["goal"]}}},
     # ── Deep Research ─────────────────────────────────────────────────────────
     {"type":"function","function":{"name":"deep_research","description":"Research a topic by searching multiple queries and synthesizing findings from several sources into a report.","parameters":{"type":"object","properties":{"topic":{"type":"string","description":"Topic to research"},"max_sources":{"type":"integer","description":"Max sources (default 8)"}},"required":["topic"]}}},
     # ── Chart Creator ─────────────────────────────────────────────────────────
@@ -2897,6 +2925,7 @@ TOOL_MAP = {
     # Vision + Planning + Research
     "browser_vision":  browser_vision,
     "make_plan":       make_plan,
+    "spawn_agent":     spawn_agent,
     "deep_research":   deep_research,
     "create_chart":    create_chart,
     "generate_password": generate_password,
@@ -2945,6 +2974,7 @@ _STREAMING_TOOLS = {
     "desktop_screenshot", "desktop_click", "desktop_type",
     "desktop_hotkey", "desktop_scroll_screen",
     "run_terminal", "workflow_run",
+    "run_code", "spawn_agent",
 }
 
 
