@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir \
     aiosqlite aiofiles edge-tts groq \
     pdfplumber reportlab python-multipart ddgs \
     yt-dlp youtube-transcript-api openai \
-    faster-whisper playwright
+    faster-whisper playwright \
+    "python-jose[cryptography]" "passlib[bcrypt]"
 RUN pip install --no-cache-dir apscheduler sqlalchemy
 RUN playwright install chromium --with-deps
 
