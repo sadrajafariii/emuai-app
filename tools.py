@@ -52,8 +52,19 @@ def _save_screenshot(png_bytes: bytes) -> str:
 # ── tool: web_search ─────────────────────────────────────────────────────────
 
 async def web_search(query: str, _send=None) -> dict:
-    """Search via DuckDuckGo API + live browser visualisation running in parallel."""
+    """Search via DuckDuckGo and show results in the persistent browser session."""
+    from browser_session import browser as _bs
 
+    # Show search in the persistent browser so phone users see it
+    async def _show_in_browser():
+        try:
+            encoded_q = urllib.parse.quote_plus(query)
+            search_url = f"https://www.bing.com/search?q={encoded_q}"
+            await _bs.navigate(search_url, send=_send)
+        except Exception as exc:
+            logger.debug("Browser search display failed (non-fatal): %s", exc)
+
+    # DDG API search for reliable text results
     async def _api_search():
         try:
             from ddgs import DDGS
@@ -66,72 +77,13 @@ async def web_search(query: str, _send=None) -> dict:
             logger.warning("DDG API error: %s", exc)
             return []
 
-    async def _browser_visual():
-        """Open a real browser, go to Bing, type + submit the query live."""
-        try:
-            from playwright.async_api import async_playwright
-            SEARCH_HOME = "https://www.bing.com"
-
-            if _send:
-                await _send({"type": "browser_frame", "url": SEARCH_HOME,
-                             "action": "Opening browser…", "image_path": None})
-
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    viewport={"width": 1280, "height": 800},
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                )
-                page = await context.new_page()
-
-                # Step 1 — Bing home page
-                if _send:
-                    await _send({"type": "browser_frame", "url": SEARCH_HOME,
-                                 "action": "Navigating to Bing", "image_path": None})
-                await page.goto(SEARCH_HOME, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(500)
-                png = await page.screenshot(full_page=False)
-                await _emit_frame(_send, page.url, "Bing loaded", png)
-
-                # Step 2 — simulate typing delay then go to search results URL
-                encoded_q = urllib.parse.quote_plus(query)
-                search_url = f"https://www.bing.com/search?q={encoded_q}"
-
-                # Brief pause so user sees home page
-                await page.wait_for_timeout(400)
-                if _send:
-                    await _send({"type": "browser_frame", "url": search_url,
-                                 "action": f'Searching: "{query}"', "image_path": None})
-
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(1500)
-
-                png = await page.screenshot(full_page=False)
-                await _emit_frame(_send, page.url, "Results loaded", png)
-
-                # Step 3 — scroll to reveal more results
-                await page.evaluate("window.scrollTo(0, 500)")
-                await page.wait_for_timeout(500)
-                png = await page.screenshot(full_page=False)
-                await _emit_frame(_send, page.url, "Reading results...", png)
-
-                await browser.close()
-        except Exception as exc:
-            logger.warning("Browser visual search failed (non-fatal): %s", exc)
-
-    # Run API search and browser visual concurrently
-    api_task      = asyncio.create_task(_api_search())
-    browser_task  = asyncio.create_task(_browser_visual())
-    results, _    = await asyncio.gather(api_task, browser_task)
+    # Run both concurrently
+    results, _ = await asyncio.gather(_api_search(), _show_in_browser())
 
     if not results:
         return {"output": "No results found.", "image_path": None}
 
-    lines = [f"Search results for: {query}\n"]
+    lines = [f"Search results for: **{query}**\n"]
     for i, r in enumerate(results[:6], 1):
         lines.append(f"{i}. **{r.get('title', '')}**")
         lines.append(f"   {r.get('href', '')}")
@@ -1500,16 +1452,22 @@ async def make_plan(goal: str) -> dict:
 
 # ── tool: deep research ───────────────────────────────────────────────────────
 
-async def deep_research(topic: str, max_sources: int = 8) -> dict:
-    """Research a topic deeply by searching multiple queries and synthesizing findings from several sources."""
+async def deep_research(topic: str, max_sources: int = 8, _send=None) -> dict:
+    """Research a topic: multi-query DDG search → open real pages in browser → synthesize report."""
     try:
         from ddgs import DDGS
-        import asyncio, settings_store, os
+        import settings_store, os
         from openai import AsyncOpenAI
+        from browser_session import browser as _bs
 
-        queries = [topic, f"{topic} latest 2025 2026", f"{topic} analysis expert opinion"]
+        async def _status(msg: str):
+            if _send:
+                await _send({"type": "status", "content": msg})
+
+        await _status(f"Searching for '{topic}'…")
+
+        queries = [topic, f"{topic} latest news 2025", f"{topic} analysis expert opinion"]
         all_results = []
-
         loop = asyncio.get_event_loop()
         for q in queries:
             try:
@@ -1524,15 +1482,39 @@ async def deep_research(topic: str, max_sources: int = 8) -> dict:
         seen, unique = set(), []
         for r in all_results:
             u = r.get("href", "")
-            if u not in seen:
+            if u and u not in seen:
                 seen.add(u)
                 unique.append(r)
 
         sources = unique[:max_sources]
-        digest = "\n\n".join([
-            f"SOURCE: {r.get('href','')}\nTITLE: {r.get('title','')}\nSUMMARY: {r.get('body','')[:400]}"
-            for r in sources
-        ])
+        if not sources:
+            return {"output": f"No results found for: {topic}", "image_path": None}
+
+        # Fetch real page content via the persistent browser (visible on phone too)
+        full_content = []
+        for i, r in enumerate(sources[:4], 1):
+            url = r.get("href", "")
+            title = r.get("title", "")
+            snippet = r.get("body", "")[:400]
+            if not url:
+                full_content.append(f"SOURCE {i}: {title}\n{snippet}")
+                continue
+            try:
+                await _status(f"Reading source {i}/4: {title[:60]}…")
+                await _bs.navigate(url, send=_send)
+                await _bs._page.wait_for_timeout(1500)
+                page_text = await _bs._page.evaluate("""() =>
+                    Array.from(document.querySelectorAll('p,h1,h2,h3,article,section'))
+                    .map(e => e.innerText?.trim()).filter(t => t && t.length > 30)
+                    .slice(0, 40).join('\\n')
+                """)
+                content = (page_text or snippet)[:2000]
+                full_content.append(f"SOURCE {i}: {title}\nURL: {url}\n{content}")
+            except Exception:
+                full_content.append(f"SOURCE {i}: {title}\nURL: {url}\n{snippet}")
+
+        await _status("Synthesizing research report…")
+        digest = "\n\n---\n\n".join(full_content)
 
         cfg = settings_store.load()
         api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
@@ -1540,15 +1522,19 @@ async def deep_research(topic: str, max_sources: int = 8) -> dict:
         response = await client.chat.completions.create(
             model="meta-llama/llama-4-maverick:free",
             messages=[
-                {"role": "system", "content": "You are a research analyst. Synthesize the provided sources into a comprehensive, well-structured research report with key findings, trends, and insights. Use markdown."},
-                {"role": "user", "content": f"Topic: {topic}\n\nSources:\n{digest}"},
+                {"role": "system", "content": (
+                    "You are a research analyst. Synthesize the sources into a comprehensive "
+                    "markdown report with: executive summary, key findings, trends, and conclusion. "
+                    "Cite specific sources. Be thorough."
+                )},
+                {"role": "user", "content": f"Topic: {topic}\n\nSources:\n{digest[:12000]}"},
             ],
-            max_tokens=2000,
-            timeout=60,
+            max_tokens=2500,
+            timeout=90,
         )
         report = response.choices[0].message.content or "Could not synthesize."
-        urls = "\n".join([f"- {r.get('href','')}" for r in sources])
-        return {"output": f"{report}\n\n---\n**Sources ({len(sources)}):**\n{urls}", "image_path": None}
+        src_list = "\n".join([f"- [{r.get('title','')[:60]}]({r.get('href','')})" for r in sources])
+        return {"output": f"{report}\n\n---\n**Sources ({len(sources)}):**\n{src_list}", "image_path": None}
     except Exception as exc:
         return {"output": f"Deep research error: {exc}", "image_path": None}
 
@@ -2921,10 +2907,12 @@ TOOL_MAP = {
 
 # Tools that receive the send callback for live streaming
 _STREAMING_TOOLS = {
-    "browse", "web_search",
+    "browse", "web_search", "deep_research",
     "browser_navigate", "browser_screenshot", "browser_click",
     "browser_type", "browser_press", "browser_scroll",
     "browser_read_page", "browser_wait", "browser_close",
+    "browser_new_tab", "browser_switch_tab", "browser_list_tabs", "browser_close_tab",
+    "browser_read_full_page",
     "desktop_screenshot", "desktop_click", "desktop_type",
     "desktop_hotkey", "desktop_scroll_screen",
     "run_terminal", "workflow_run",
