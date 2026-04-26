@@ -91,6 +91,14 @@ You have full access to the user's computer:
 - write_system_file(path, content) — save files anywhere.
 - download_video(url) — download videos from YouTube, Twitter, TikTok, Instagram, etc.
 
+## Music / Media Control (no vision needed)
+- desktop_media_key(action) — controls any media player in the background:
+  - 'play_pause' — play or pause Spotify, YouTube Music, etc.
+  - 'next' — skip to next track
+  - 'prev' — go to previous track
+  - 'volume_up' / 'volume_down' / 'mute'
+  Use this FIRST for any music control task before trying vision or clicks.
+
 ## Full Desktop / GUI Control (any app, any window)
 You can control the entire desktop — every app, window, and UI element:
 - open_app(name) — launch any app: 'chrome', 'spotify', 'notepad', 'vscode', 'discord', 'calculator', etc.

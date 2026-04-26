@@ -85,7 +85,32 @@ async def _vision_call(messages: list, timeout: int = 30) -> str:
                     continue
                 raise
 
-    raise RuntimeError(f"All vision providers failed. Last: {last_err}")
+    # ── 3. Windows built-in OCR (offline, no key needed, text extraction only) ──
+    try:
+        import pytesseract
+        from PIL import Image
+        from io import BytesIO
+        # Extract image bytes from the messages
+        for msg in messages:
+            for part in (msg.get("content") or []):
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    url = part["image_url"]["url"]
+                    if url.startswith("data:image"):
+                        b64data = url.split(",", 1)[1]
+                        img = Image.open(BytesIO(base64.b64decode(b64data)))
+                        text = pytesseract.image_to_string(img)
+                        question = next(
+                            (p["text"] for p in (msg.get("content") or []) if isinstance(p, dict) and p.get("type") == "text"),
+                            ""
+                        )
+                        return f"[OCR text from screen — vision AI unavailable]\n{text.strip()}\n\nNote: This is OCR text only. Get a free Groq API key at console.groq.com for full vision."
+    except Exception:
+        pass
+
+    raise RuntimeError(
+        f"Vision unavailable. Last error: {last_err}\n\n"
+        "To enable vision: get a free Groq API key at console.groq.com and add it in Settings → Groq API Key."
+    )
 
 # ── In-process search cache (TTL 5 min, max 200 entries) ─────────────────────
 _search_cache: dict[str, tuple[float, list]] = {}  # query -> (timestamp, results)
@@ -911,29 +936,33 @@ async def open_app(name: str, _send=None) -> dict:
                 "telegram": "telegram",
             }
             cmd = aliases.get(name.lower().strip(), name)
-            # Special handling for apps not reliably in PATH
-            special = {
+            # Special handling for Store/UWP apps not in PATH
+            # Try exe paths in order; skip entries that don't exist on disk.
+            _lname = name.lower().strip()
+            _special_paths = {
                 "spotify": [
+                    os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\Spotify.exe"),
                     os.path.expandvars(r"%APPDATA%\Spotify\Spotify.exe"),
-                    "explorer.exe shell:AppsFolder\\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
                 ],
                 "whatsapp": [
-                    "explorer.exe shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!WhatsApp",
+                    os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\WhatsApp.exe"),
                 ],
                 "telegram": [
                     os.path.expandvars(r"%APPDATA%\Telegram Desktop\Telegram.exe"),
+                    os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\TelegramDesktop.exe"),
+                ],
+                "discord": [
+                    os.path.expandvars(r"%LOCALAPPDATA%\Discord\Update.exe"),
                 ],
             }
-            if cmd.lower() in special:
-                for attempt in special[cmd.lower()]:
-                    try:
-                        if os.path.isfile(attempt):
-                            subprocess.Popen([attempt], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        else:
-                            subprocess.Popen(attempt, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        return f"Launched: {name}"
-                    except Exception:
-                        continue
+            if _lname in _special_paths:
+                for exe_path in _special_paths[_lname]:
+                    if os.path.isfile(exe_path):
+                        try:
+                            subprocess.Popen([exe_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            return f"Launched: {name}"
+                        except Exception:
+                            continue
             try:
                 if cmd.startswith("ms-"):
                     import os
@@ -1210,6 +1239,33 @@ async def desktop_find_element(app_title: str, element_name: str = "", action: s
         return {"output": result, "image_path": img_path}
     except Exception as exc:
         return {"output": f"desktop_find_element error: {exc}", "image_path": None}
+
+
+async def desktop_media_key(action: str) -> dict:
+    """
+    Send a media control key to the OS — works for Spotify, YouTube Music,
+    Windows Media Player, or any app playing audio, even in the background.
+    action: 'play_pause', 'next', 'prev', 'volume_up', 'volume_down', 'mute'
+    """
+    try:
+        import pyautogui
+        key_map = {
+            "play_pause":  "playpause",
+            "next":        "nexttrack",
+            "prev":        "prevtrack",
+            "previous":    "prevtrack",
+            "volume_up":   "volumeup",
+            "volume_down": "volumedown",
+            "mute":        "volumemute",
+        }
+        key = key_map.get(action.lower().replace(" ", "_"))
+        if not key:
+            return {"output": f"Unknown action '{action}'. Use: play_pause, next, prev, volume_up, volume_down, mute", "image_path": None}
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: pyautogui.press(key))
+        return {"output": f"✓ Media key sent: {action}", "image_path": None}
+    except Exception as exc:
+        return {"output": f"desktop_media_key error: {exc}", "image_path": None}
 
 
 async def desktop_double_click(x: int, y: int, _send=None) -> dict:
@@ -3196,6 +3252,7 @@ TOOL_SCHEMAS = [
     {"type":"function","function":{"name":"focus_window","description":"Find a window by title and bring it to the foreground. Partial match. Example: focus_window('Notepad'), focus_window('Chrome').","parameters":{"type":"object","properties":{"title":{"type":"string","description":"Partial window title to search for"}},"required":["title"]}}},
     {"type":"function","function":{"name":"desktop_vision","description":"Take a full desktop screenshot and use vision AI to understand what is on screen — read text, find buttons, get coordinates for clicking. ALWAYS call after opening an app before clicking anything.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze (default: What is on screen?)"}},"required":[]}}},
     {"type":"function","function":{"name":"desktop_find_element","description":"Find and click any UI element in any app by NAME using Windows accessibility APIs — no coordinates or vision needed. PREFER this over desktop_vision for clicking buttons. First use action='list' to see all elements, then action='click' with the element name.","parameters":{"type":"object","properties":{"app_title":{"type":"string","description":"Partial window title (e.g. 'Spotify', 'Chrome', 'Notepad')"},"element_name":{"type":"string","description":"Name of the button/control to find (e.g. 'Play', 'Pause', 'Search', 'Settings')"},"action":{"type":"string","description":"'list' to discover elements, 'click' to click, 'get_text' to read value","enum":["list","click","get_text"]}},"required":["app_title"]}}},
+    {"type":"function","function":{"name":"desktop_media_key","description":"Send a media control key to the OS — controls Spotify, YouTube Music, or any media player even in the background. Use this for play/pause/skip without needing to see the screen.","parameters":{"type":"object","properties":{"action":{"type":"string","description":"Media action to perform","enum":["play_pause","next","prev","volume_up","volume_down","mute"]}},"required":["action"]}}},
     {"type":"function","function":{"name":"desktop_double_click","description":"Double-click at desktop coordinates (x, y). Use for opening files, apps in taskbar, selecting words.","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"}},"required":["x","y"]}}},
     {"type":"function","function":{"name":"desktop_right_click","description":"Right-click at desktop coordinates to open context menus.","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"}},"required":["x","y"]}}},
     {"type":"function","function":{"name":"desktop_drag","description":"Click and drag from (x1,y1) to (x2,y2). Use for moving windows, selecting text, drag-and-drop.","parameters":{"type":"object","properties":{"x1":{"type":"integer"},"y1":{"type":"integer"},"x2":{"type":"integer"},"y2":{"type":"integer"},"duration":{"type":"number","description":"Drag duration seconds (default 0.5)"}},"required":["x1","y1","x2","y2"]}}},
@@ -3883,6 +3940,7 @@ TOOL_MAP = {
     "focus_window":           focus_window,
     "desktop_vision":         desktop_vision,
     "desktop_find_element":   desktop_find_element,
+    "desktop_media_key":      desktop_media_key,
     "desktop_double_click":   desktop_double_click,
     "desktop_right_click":  desktop_right_click,
     "desktop_drag":         desktop_drag,
