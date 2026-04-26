@@ -19,15 +19,15 @@ logger = logging.getLogger(__name__)
 
 # ── editable model fallback chain ─────────────────────────────────────────────
 MODELS = [
+    "qwen/qwen3-235b-a22b-instruct-2507",           # Primary: cheapest, best value
     "deepseek/deepseek-r1:free",                    # Best reasoning, shows thinking
     "deepseek/deepseek-chat-v3-0324:free",          # Best coding/chat
     "meta-llama/llama-4-maverick:free",             # Llama 4
     "meta-llama/llama-4-scout:free",                # Llama 4 Scout
-    "qwen/qwen3-235b-a22b:free",                    # Qwen 3 large
+    "qwen/qwen3-235b-a22b:free",                    # Qwen 3 large (free)
     "qwen/qwen3-30b-a3b:free",                      # Qwen 3 medium
     "nousresearch/hermes-3-llama-3.1-405b:free",    # Hermes 405B
     "google/gemma-3-27b-it:free",                   # Gemma 3 27B
-    "google/gemma-3-12b-it:free",                   # Gemma 3 12B
     "meta-llama/llama-3.3-70b-instruct:free",       # Llama 3.3 70B
 ]
 
