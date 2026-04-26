@@ -58,6 +58,10 @@ class BrowserSession:
         # launch_persistent_context = browser + saved profile in one call
         # On cloud servers (no display), force headless. Set BROWSER_HEADLESS=false for local visible browser.
         headless = os.getenv("BROWSER_HEADLESS", "true").lower() != "false"
+        # Randomise viewport slightly so fingerprint differs each launch
+        import random
+        vw = random.randint(1260, 1380)
+        vh = random.randint(780, 860)
         launch_kwargs = dict(
             headless=headless,
             args=[
@@ -67,14 +71,18 @@ class BrowserSession:
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
                 "--no-default-browser-check",
+                "--disable-features=IsolateOrigins,site-per-process",
+                f"--window-size={vw},{vh}",
             ],
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": vw, "height": vh},
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
+                f"Chrome/12{random.randint(0,5)}.0.0.0 Safari/537.36"
             ),
             java_script_enabled=True,
+            locale="en-US",
+            timezone_id="America/New_York",
         )
         if BROWSER_EXECUTABLE:
             launch_kwargs["executable_path"] = BROWSER_EXECUTABLE
@@ -87,7 +95,19 @@ class BrowserSession:
         # Reuse existing page if profile already has one open
         pages = self._context.pages
         self._page = pages[0] if pages else await self._context.new_page()
-        logger.info("Browser ready (profile: %s)", PROFILE_DIR)
+        self._tabs: list = [self._page]
+
+        # Stealth: hide webdriver fingerprint on every new page
+        async def _stealth(page):
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US','en']});
+                window.chrome = {runtime: {}};
+            """)
+        await _stealth(self._page)
+        self._context.on("page", lambda p: asyncio.ensure_future(_stealth(p)))
+        logger.info("Browser ready (profile: %s, stealth=on)", PROFILE_DIR)
 
     async def _snap(self, action: str, send=None) -> str:
         try:
@@ -193,8 +213,9 @@ class BrowserSession:
         async with self._get_lock():
             await self._ensure()
             try:
+                import random as _r
                 if selector == "focused":
-                    await self._page.keyboard.type(text, delay=25)
+                    await self._page.keyboard.type(text, delay=_r.randint(30, 80))
                 elif selector.startswith("text="):
                     label = selector[5:].strip()
                     el = self._page.get_by_label(label).first
@@ -253,6 +274,52 @@ class BrowserSession:
             await self._page.wait_for_timeout(ms)
             img = await self._snap(f"Waited {ms}ms", send)
             return {"output": f"Waited {ms}ms. URL: {self._page.url}", "image_path": img}
+
+    async def new_tab(self, url: str = "", send=None) -> dict:
+        async with self._get_lock():
+            await self._ensure()
+            page = await self._context.new_page()
+            self._tabs.append(page)
+            self._page = page
+            idx = len(self._tabs) - 1
+            if url:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                await page.wait_for_timeout(1000)
+            img = await self._snap(f"New tab {idx}: {url or 'blank'}", send)
+            ctx = await self._page_context()
+            return {"output": f"Opened tab {idx}: {self._page.url}{ctx}", "image_path": img}
+
+    async def switch_tab(self, index: int, send=None) -> dict:
+        async with self._get_lock():
+            await self._ensure()
+            self._tabs = [p for p in self._tabs if not p.is_closed()]
+            if index < 0 or index >= len(self._tabs):
+                return {"output": f"Tab {index} not found. Open tabs: {len(self._tabs)}", "image_path": None}
+            self._page = self._tabs[index]
+            await self._page.bring_to_front()
+            img = await self._snap(f"Switched to tab {index}", send)
+            ctx = await self._page_context()
+            return {"output": f"Switched to tab {index}: {self._page.url}{ctx}", "image_path": img}
+
+    async def list_tabs(self, send=None) -> dict:
+        async with self._get_lock():
+            await self._ensure()
+            self._tabs = [p for p in self._tabs if not p.is_closed()]
+            lines = [f"Tab {i}: {p.url}" for i, p in enumerate(self._tabs)]
+            current = self._tabs.index(self._page) if self._page in self._tabs else -1
+            return {"output": f"Open tabs (current={current}):\n" + "\n".join(lines), "image_path": None}
+
+    async def close_tab(self, index: int, send=None) -> dict:
+        async with self._get_lock():
+            await self._ensure()
+            self._tabs = [p for p in self._tabs if not p.is_closed()]
+            if index < 0 or index >= len(self._tabs):
+                return {"output": f"Tab {index} not found.", "image_path": None}
+            await self._tabs[index].close()
+            self._tabs = [p for p in self._tabs if not p.is_closed()]
+            if self._tabs:
+                self._page = self._tabs[-1]
+            return {"output": f"Closed tab {index}. {len(self._tabs)} tab(s) remaining.", "image_path": None}
 
     async def close(self, send=None) -> dict:
         try:

@@ -130,6 +130,26 @@ async def init_db():
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS webhooks (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                prompt_template TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS cost_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                session_id TEXT,
+                model TEXT NOT NULL,
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                cost_usd REAL DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
         """)
 
         # Safe migrations for pre-existing databases
@@ -762,3 +782,93 @@ async def get_tasks(user_id: str = None, limit: int = 50) -> list[dict]:
             ) as cur:
                 rows = await cur.fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Webhooks ───────────────────────────────────────────────────────────────────
+
+async def create_webhook(user_id: str, name: str, prompt_template: str) -> dict:
+    wid = str(uuid.uuid4())
+    token = str(uuid.uuid4()).replace("-", "")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO webhooks (id, user_id, name, token, prompt_template) VALUES (?,?,?,?,?)",
+            (wid, user_id, name, token, prompt_template),
+        )
+        await db.commit()
+    return {"id": wid, "token": token, "name": name, "prompt_template": prompt_template}
+
+
+async def get_webhook_by_token(token: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM webhooks WHERE token=?", (token,)
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def list_webhooks(user_id: str) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM webhooks WHERE user_id=? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def delete_webhook(user_id: str, webhook_id: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "DELETE FROM webhooks WHERE id=? AND user_id=?", (webhook_id, user_id)
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
+# ── Cost tracker ───────────────────────────────────────────────────────────────
+
+# Approximate pricing per 1M tokens (input/output blended) for OpenRouter free models
+_MODEL_COST_PER_1M: dict[str, float] = {
+    # All free models — $0 cost (rate-limited on OpenRouter free tier)
+}
+
+
+async def log_cost(user_id: str, session_id: str, model: str,
+                   prompt_tokens: int, completion_tokens: int):
+    per_1m = _MODEL_COST_PER_1M.get(model, 0.0)
+    total_tokens = prompt_tokens + completion_tokens
+    cost_usd = (total_tokens / 1_000_000) * per_1m
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO cost_log (user_id, session_id, model, prompt_tokens,
+               completion_tokens, cost_usd) VALUES (?,?,?,?,?,?)""",
+            (user_id, session_id, model, prompt_tokens, completion_tokens, cost_usd),
+        )
+        await db.commit()
+
+
+async def get_cost_summary(user_id: str) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT model,
+                      SUM(prompt_tokens) as prompt_tokens,
+                      SUM(completion_tokens) as completion_tokens,
+                      SUM(cost_usd) as cost_usd,
+                      COUNT(*) as calls
+               FROM cost_log WHERE user_id=? GROUP BY model ORDER BY calls DESC""",
+            (user_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        async with db.execute(
+            "SELECT SUM(cost_usd) as total FROM cost_log WHERE user_id=?",
+            (user_id,),
+        ) as cur:
+            total_row = await cur.fetchone()
+    return {
+        "total_usd": round((total_row["total"] or 0), 6),
+        "by_model": [dict(r) for r in rows],
+    }

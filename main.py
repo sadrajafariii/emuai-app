@@ -583,6 +583,69 @@ async def get_tasks(request: Request, limit: int = 50):
     return JSONResponse({"tasks": tasks})
 
 
+# ── Webhooks ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/webhooks")
+async def list_webhooks(request: Request):
+    user = get_current_user(request)
+    hooks = await db.list_webhooks(user["id"])
+    return JSONResponse({"webhooks": hooks})
+
+
+@app.post("/api/webhooks")
+async def create_webhook(request: Request):
+    user = get_current_user(request)
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    prompt_template = (body.get("prompt_template") or "").strip()
+    if not name or not prompt_template:
+        raise HTTPException(status_code=400, detail="name and prompt_template required")
+    hook = await db.create_webhook(user["id"], name, prompt_template)
+    return JSONResponse(hook)
+
+
+@app.delete("/api/webhooks/{webhook_id}")
+async def delete_webhook(request: Request, webhook_id: str):
+    user = get_current_user(request)
+    deleted = await db.delete_webhook(user["id"], webhook_id)
+    return JSONResponse({"ok": deleted})
+
+
+@app.post("/webhook/{token}")
+async def receive_webhook(token: str, request: Request):
+    """Public endpoint — anyone with the token can trigger an agent task."""
+    hook = await db.get_webhook_by_token(token)
+    if not hook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+
+    # Allow body variables like {body} to be substituted into the prompt
+    try:
+        raw_body = await request.body()
+        body_text = raw_body.decode("utf-8", errors="replace")[:500]
+    except Exception:
+        body_text = ""
+
+    prompt = hook["prompt_template"].replace("{body}", body_text)
+
+    # Create a session and run the agent in the background
+    session = await db.create_session(user_id=hook["user_id"])
+
+    async def _noop_send(_):
+        pass
+
+    asyncio.create_task(run_agent(session["id"], prompt, _noop_send, user_id=hook["user_id"]))
+    return JSONResponse({"ok": True, "session_id": session["id"]})
+
+
+# ── Cost tracker ──────────────────────────────────────────────────────────────
+
+@app.get("/api/cost")
+async def get_cost(request: Request):
+    user = get_current_user(request)
+    summary = await db.get_cost_summary(user["id"])
+    return JSONResponse(summary)
+
+
 # ── Personas ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/personas")

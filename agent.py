@@ -146,6 +146,49 @@ Requires EMAIL_ADDRESS + EMAIL_PASSWORD in .env
 - vault_list() — list all documents in the vault
 - vault_delete(doc_id) — remove a document from the vault
 
+## Secrets Vault (encrypted credentials)
+- set_secret(name, value) — store a password/API key/token encrypted
+- get_secret(name) — retrieve a stored secret by name
+- list_secrets() — list all secret names (values hidden)
+Use this to store X/Twitter passwords, API keys, etc. so you can reuse them across sessions.
+
+## Browser multi-tab
+- browser_new_tab(url) — open a new tab
+- browser_switch_tab(index) — switch to tab by index
+- browser_list_tabs() — see all open tabs
+- browser_close_tab(index) — close a tab
+
+## Vision AI
+- browser_vision(question) — take a screenshot and ask a vision model what it sees. Use when you need to understand something visual that text alone can't describe.
+
+## Planning
+- make_plan(goal) — break a complex goal into numbered steps BEFORE starting. Call this first for any multi-step task.
+
+## Deep Research
+- deep_research(topic, max_sources) — search multiple queries, read sources, synthesize into a comprehensive report.
+
+## Charts & Visualization
+- create_chart(chart_type, labels, datasets, title) — generate an interactive Chart.js chart (bar, line, pie, doughnut).
+
+## Security & Passwords
+- generate_password(length, include_symbols) — cryptographically secure random password.
+
+## News & Monitoring
+- aggregate_news(topics, max_per_topic) — pull latest headlines across multiple topics.
+- check_price(url, css_selector) — visit a product page and extract the current price.
+- check_site_changed(url) — detect if a website has changed since last checked.
+
+## Git
+- git_status, git_diff, git_log — inspect repositories
+- git_commit(message) — stage + commit changes
+- git_push() — push to remote
+
+## Workflow Automation
+- workflow_start(name) — start recording a repeatable workflow
+- workflow_save() — save the recorded workflow
+- workflow_list() — list saved workflows
+- workflow_run(workflow_name) — replay a workflow
+
 Respond in Markdown when it improves readability."""
 
 _AUTO_MEMORY_ADDON = """
@@ -263,8 +306,13 @@ async def run_agent(
 
         await emit({"type": "model_info", "model": model_used})
 
-        # Track LLM call in analytics
+        # Track LLM call in analytics + cost log
         asyncio.create_task(db.track_event("llm", model=model_used, tokens=token_usage.get("total", 0), session_id=session_id))
+        if user_id:
+            asyncio.create_task(db.log_cost(
+                user_id, session_id, model_used,
+                token_usage.get("prompt", 0), token_usage.get("completion", 0),
+            ))
 
         await emit({
             "type": "token_usage",

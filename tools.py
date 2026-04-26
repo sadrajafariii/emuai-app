@@ -1417,6 +1417,273 @@ async def browser_close(_send=None) -> dict:
     from browser_session import browser
     return await browser.close(send=_send)
 
+async def browser_new_tab(url: str = "", _send=None) -> dict:
+    from browser_session import browser
+    return await browser.new_tab(url, send=_send)
+
+async def browser_switch_tab(index: int, _send=None) -> dict:
+    from browser_session import browser
+    return await browser.switch_tab(index, send=_send)
+
+async def browser_list_tabs(_send=None) -> dict:
+    from browser_session import browser
+    return await browser.list_tabs(send=_send)
+
+async def browser_close_tab(index: int, _send=None) -> dict:
+    from browser_session import browser
+    return await browser.close_tab(index, send=_send)
+
+
+# ── tool: browser vision ──────────────────────────────────────────────────────
+
+async def browser_vision(question: str = "What is on this page? Describe all visible elements, text, buttons, and what the page is about.") -> dict:
+    """Take a screenshot and ask a vision model what it sees. Gives the agent true visual understanding."""
+    from browser_session import browser
+    import base64
+    try:
+        page = browser._page
+        if not page or page.is_closed():
+            return {"output": "No browser page open. Navigate somewhere first.", "image_path": None}
+        png = await page.screenshot(full_page=False)
+        b64 = base64.b64encode(png).decode()
+
+        # Call vision model via OpenRouter
+        import settings_store, os
+        from openai import AsyncOpenAI
+        cfg = settings_store.load()
+        api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
+        client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+
+        response = await client.chat.completions.create(
+            model="meta-llama/llama-4-maverick:free",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    {"type": "text", "text": question},
+                ]
+            }],
+            timeout=30,
+        )
+        description = response.choices[0].message.content or "Could not analyze image."
+        name = f"{uuid.uuid4().hex}.png"
+        dest = SCREENSHOTS_DIR / name
+        dest.write_bytes(png)
+        return {"output": f"Vision analysis:\n{description}", "image_path": f"/static/screenshots/{name}"}
+    except Exception as exc:
+        return {"output": f"Vision error: {exc}", "image_path": None}
+
+
+# ── tool: planning ────────────────────────────────────────────────────────────
+
+async def make_plan(goal: str) -> dict:
+    """Break a complex goal into a numbered step-by-step execution plan before starting work."""
+    import settings_store, os
+    from openai import AsyncOpenAI
+    cfg = settings_store.load()
+    api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
+    client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+    try:
+        response = await client.chat.completions.create(
+            model="meta-llama/llama-4-scout:free",
+            messages=[
+                {"role": "system", "content": "You are a planning assistant. Break the user's goal into clear, numbered, executable steps. Be specific about tools and actions. Output ONLY the numbered list, nothing else."},
+                {"role": "user", "content": f"Goal: {goal}"},
+            ],
+            timeout=30,
+        )
+        plan = response.choices[0].message.content or "Could not generate plan."
+        return {"output": f"📋 Execution Plan:\n{plan}", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Planning error: {exc}", "image_path": None}
+
+
+# ── tool: deep research ───────────────────────────────────────────────────────
+
+async def deep_research(topic: str, max_sources: int = 8) -> dict:
+    """Research a topic deeply by searching multiple queries and synthesizing findings from several sources."""
+    try:
+        from ddgs import DDGS
+        import asyncio, settings_store, os
+        from openai import AsyncOpenAI
+
+        queries = [topic, f"{topic} latest 2025 2026", f"{topic} analysis expert opinion"]
+        all_results = []
+
+        loop = asyncio.get_event_loop()
+        for q in queries:
+            try:
+                def _search(q=q):
+                    with DDGS() as d:
+                        return list(d.text(q, max_results=4))
+                results = await loop.run_in_executor(None, _search)
+                all_results.extend(results)
+            except Exception:
+                pass
+
+        seen, unique = set(), []
+        for r in all_results:
+            u = r.get("href", "")
+            if u not in seen:
+                seen.add(u)
+                unique.append(r)
+
+        sources = unique[:max_sources]
+        digest = "\n\n".join([
+            f"SOURCE: {r.get('href','')}\nTITLE: {r.get('title','')}\nSUMMARY: {r.get('body','')[:400]}"
+            for r in sources
+        ])
+
+        cfg = settings_store.load()
+        api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
+        client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+        response = await client.chat.completions.create(
+            model="meta-llama/llama-4-maverick:free",
+            messages=[
+                {"role": "system", "content": "You are a research analyst. Synthesize the provided sources into a comprehensive, well-structured research report with key findings, trends, and insights. Use markdown."},
+                {"role": "user", "content": f"Topic: {topic}\n\nSources:\n{digest}"},
+            ],
+            max_tokens=2000,
+            timeout=60,
+        )
+        report = response.choices[0].message.content or "Could not synthesize."
+        urls = "\n".join([f"- {r.get('href','')}" for r in sources])
+        return {"output": f"{report}\n\n---\n**Sources ({len(sources)}):**\n{urls}", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Deep research error: {exc}", "image_path": None}
+
+
+# ── tool: chart creator ───────────────────────────────────────────────────────
+
+async def create_chart(chart_type: str, labels: list, datasets: list, title: str = "Chart") -> dict:
+    """Create an interactive chart and display it in the browser. chart_type: bar, line, pie, doughnut."""
+    colors = ["#c8a45e","#4caf7d","#e06060","#5b8dee","#e0a040","#9b59b6","#1abc9c"]
+    ds_html = []
+    for i, ds in enumerate(datasets):
+        c = colors[i % len(colors)]
+        ds_html.append(f"""{{
+            label: {json.dumps(ds.get('label', f'Series {i+1}'))},
+            data: {json.dumps(ds.get('data', []))},
+            backgroundColor: '{c}88',
+            borderColor: '{c}',
+            borderWidth: 2,
+            tension: 0.4
+        }}""")
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>body{{background:#0f0c08;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;font-family:sans-serif;}}
+.wrap{{background:#1a1510;border:1px solid #c8a45e33;border-radius:12px;padding:2rem;width:90%;max-width:800px;}}</style>
+</head><body><div class="wrap">
+<canvas id="c"></canvas></div>
+<script>
+new Chart(document.getElementById('c'), {{
+  type: {json.dumps(chart_type)},
+  data: {{ labels: {json.dumps(labels)}, datasets: [{', '.join(ds_html)}] }},
+  options: {{
+    responsive: true,
+    plugins: {{
+      legend: {{ labels: {{ color: '#c8a45e' }} }},
+      title: {{ display: true, text: {json.dumps(title)}, color: '#c8a45e', font: {{ size: 18 }} }}
+    }},
+    scales: {{ x: {{ ticks: {{ color: '#8a7a6a' }} }}, y: {{ ticks: {{ color: '#8a7a6a' }} }} }}
+  }}
+}});
+</script></body></html>"""
+    return await serve_html_app(html, title)
+
+
+# ── tool: password generator ──────────────────────────────────────────────────
+
+async def generate_password(length: int = 20, include_symbols: bool = True) -> dict:
+    """Generate a cryptographically secure random password."""
+    import secrets, string
+    alphabet = string.ascii_letters + string.digits
+    if include_symbols:
+        alphabet += "!@#$%^&*()-_=+[]{}|;:,.<>?"
+    password = ''.join(secrets.choice(alphabet) for _ in range(max(8, min(length, 128))))
+    return {"output": f"Generated password ({length} chars):\n`{password}`\n\nUse set_secret() to store it securely.", "image_path": None}
+
+
+# ── tool: news aggregator ─────────────────────────────────────────────────────
+
+async def aggregate_news(topics: list, max_per_topic: int = 3) -> dict:
+    """Aggregate latest news across multiple topics and return a structured digest."""
+    try:
+        from ddgs import DDGS
+        import asyncio
+        loop = asyncio.get_event_loop()
+        digest = []
+        for topic in topics[:5]:
+            try:
+                def _search(t=topic):
+                    with DDGS() as d:
+                        return list(d.news(t, max_results=max_per_topic))
+                results = await loop.run_in_executor(None, _search)
+                if results:
+                    digest.append(f"\n### {topic}")
+                    for r in results:
+                        digest.append(f"- **{r.get('title','')}** — {r.get('source','')} [{r.get('date','')}]\n  {r.get('body','')[:200]}\n  {r.get('url','')}")
+            except Exception:
+                pass
+        if not digest:
+            return {"output": "No news found.", "image_path": None}
+        return {"output": "# News Digest\n" + "\n".join(digest), "image_path": None}
+    except Exception as exc:
+        return {"output": f"News aggregator error: {exc}", "image_path": None}
+
+
+# ── tool: price monitor ───────────────────────────────────────────────────────
+
+async def check_price(url: str, css_selector: str = "") -> dict:
+    """Visit a product page and extract the price. Use css_selector to target the price element."""
+    try:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+            await page.wait_for_timeout(2000)
+            if css_selector:
+                el = await page.query_selector(css_selector)
+                price_text = await el.inner_text() if el else "Selector not found"
+            else:
+                # Try common price selectors
+                for sel in ['[class*="price"]','[id*="price"]','[data-testid*="price"]','span.a-price','h2.price']:
+                    el = await page.query_selector(sel)
+                    if el:
+                        price_text = await el.inner_text()
+                        break
+                else:
+                    price_text = "Could not find price element. Try providing a css_selector."
+            await browser.close()
+            return {"output": f"Price found: {price_text.strip()}\nURL: {url}", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Price check error: {exc}", "image_path": None}
+
+
+# ── tool: site change detector ────────────────────────────────────────────────
+
+_site_hashes: dict[str, str] = {}
+
+async def check_site_changed(url: str) -> dict:
+    """Check if a website's content has changed since last time you checked it."""
+    import hashlib
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(url, follow_redirects=True)
+            content_hash = hashlib.md5(r.text.encode()).hexdigest()
+        prev = _site_hashes.get(url)
+        _site_hashes[url] = content_hash
+        if prev is None:
+            return {"output": f"Baseline saved for {url}. Call again later to detect changes.", "image_path": None}
+        if prev == content_hash:
+            return {"output": f"No changes detected at {url}.", "image_path": None}
+        return {"output": f"⚠ CHANGE DETECTED at {url}!\nPrevious hash: {prev}\nNew hash: {content_hash}", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Site check error: {exc}", "image_path": None}
+
 
 # ── tool registry ─────────────────────────────────────────────────────────────
 
@@ -1966,6 +2233,27 @@ TOOL_SCHEMAS = [
         },
     },
 
+    # ── Browser tabs ──────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"browser_new_tab","description":"Open a new browser tab, optionally navigating to a URL.","parameters":{"type":"object","properties":{"url":{"type":"string","description":"URL to open (optional)"}},"required":[]}}},
+    {"type":"function","function":{"name":"browser_switch_tab","description":"Switch to a browser tab by index.","parameters":{"type":"object","properties":{"index":{"type":"integer","description":"Tab index (0-based)"}},"required":["index"]}}},
+    {"type":"function","function":{"name":"browser_list_tabs","description":"List all open browser tabs and their URLs.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"browser_close_tab","description":"Close a browser tab by index.","parameters":{"type":"object","properties":{"index":{"type":"integer","description":"Tab index to close"}},"required":["index"]}}},
+    # ── Vision ────────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"browser_vision","description":"Take a screenshot and use vision AI to understand what's on screen. Use when you need visual understanding of the page.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze in the screenshot"}},"required":[]}}},
+    # ── Planning ──────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"make_plan","description":"Break a complex goal into numbered execution steps. Call this FIRST before any multi-step task.","parameters":{"type":"object","properties":{"goal":{"type":"string","description":"The goal to plan"}},"required":["goal"]}}},
+    # ── Deep Research ─────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"deep_research","description":"Research a topic by searching multiple queries and synthesizing findings from several sources into a report.","parameters":{"type":"object","properties":{"topic":{"type":"string","description":"Topic to research"},"max_sources":{"type":"integer","description":"Max sources (default 8)"}},"required":["topic"]}}},
+    # ── Chart Creator ─────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"create_chart","description":"Create an interactive chart in the browser. chart_type: bar, line, pie, doughnut.","parameters":{"type":"object","properties":{"chart_type":{"type":"string"},"labels":{"type":"array","items":{"type":"string"}},"datasets":{"type":"array","items":{"type":"object"}},"title":{"type":"string"}},"required":["chart_type","labels","datasets"]}}},
+    # ── Password Generator ────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"generate_password","description":"Generate a cryptographically secure random password.","parameters":{"type":"object","properties":{"length":{"type":"integer"},"include_symbols":{"type":"boolean"}},"required":[]}}},
+    # ── News Aggregator ───────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"aggregate_news","description":"Aggregate latest news across multiple topics into a digest.","parameters":{"type":"object","properties":{"topics":{"type":"array","items":{"type":"string"}},"max_per_topic":{"type":"integer"}},"required":["topics"]}}},
+    # ── Price & Site Monitor ──────────────────────────────────────────────────
+    {"type":"function","function":{"name":"check_price","description":"Visit a product page and extract the current price.","parameters":{"type":"object","properties":{"url":{"type":"string"},"css_selector":{"type":"string"}},"required":["url"]}}},
+    {"type":"function","function":{"name":"check_site_changed","description":"Check if a website changed since last checked. Call once to set baseline, again later to detect changes.","parameters":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}}},
+
     # ── Secrets vault ─────────────────────────────────────────────────────────
     {
         "type": "function",
@@ -2196,6 +2484,20 @@ TOOL_MAP = {
     "get_secret":   get_secret,
     "set_secret":   set_secret,
     "list_secrets": list_secrets,
+    # Browser tabs
+    "browser_new_tab":    browser_new_tab,
+    "browser_switch_tab": browser_switch_tab,
+    "browser_list_tabs":  browser_list_tabs,
+    "browser_close_tab":  browser_close_tab,
+    # Vision + Planning + Research
+    "browser_vision":  browser_vision,
+    "make_plan":       make_plan,
+    "deep_research":   deep_research,
+    "create_chart":    create_chart,
+    "generate_password": generate_password,
+    "aggregate_news":  aggregate_news,
+    "check_price":     check_price,
+    "check_site_changed": check_site_changed,
     # Browser control
     "browser_navigate":   browser_navigate,
     "browser_screenshot": browser_screenshot,
