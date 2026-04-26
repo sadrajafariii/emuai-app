@@ -23,13 +23,12 @@ MODELS = [
     "deepseek/deepseek-r1:free",                    # Best reasoning, shows thinking
     "deepseek/deepseek-chat-v3-0324:free",          # Best coding/chat
     "meta-llama/llama-4-maverick:free",             # Llama 4 Maverick
-    "meta-llama/llama-4-scout:free",                # Llama 4 Scout
     "qwen/qwen3-235b-a22b:free",                    # Qwen 3 235B MoE
     "qwen/qwen3-30b-a3b:free",                      # Qwen 3 30B
     "qwen/qwen3-8b:free",                           # Qwen 3 8B
     "nousresearch/hermes-3-llama-3.1-405b:free",    # Hermes 3 405B
     "mistralai/mistral-7b-instruct:free",           # Mistral 7B
-    "microsoft/phi-4-reasoning-plus:free",          # Phi-4 reasoning
+    "tngtech/deepseek-r1t-chimera:free",            # DeepSeek R1T Chimera
     "google/gemma-3-27b-it:free",                   # Gemma 3 27B
     "google/gemma-3-12b-it:free",                   # Gemma 3 12B
     "google/gemma-3-4b-it:free",                    # Gemma 3 4B

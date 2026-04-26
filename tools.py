@@ -35,6 +35,13 @@ CODE_TIMEOUT = int(os.getenv("CODE_TIMEOUT", "30"))
 
 def _safe_path(path: str) -> Path:
     """Resolve path inside workspace; raise if it escapes."""
+    # Strip common prefixes the agent uses: /workspace/, workspace/
+    for prefix in ("/workspace/", "workspace/"):
+        if path.startswith(prefix):
+            path = path[len(prefix):]
+            break
+    # On Windows, Path('/foo') doesn't override drive; use lstrip for safety
+    path = path.lstrip("/\\")
     p = (WORKSPACE / path).resolve()
     if not str(p).startswith(str(WORKSPACE)):
         raise ValueError(f"Path '{path}' escapes workspace.")
@@ -1430,21 +1437,14 @@ async def browser_vision(question: str = "What is on this page? Describe all vis
 
 async def make_plan(goal: str) -> dict:
     """Break a complex goal into a numbered step-by-step execution plan before starting work."""
-    import settings_store, os
-    from openai import AsyncOpenAI
-    cfg = settings_store.load()
-    api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
-    client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
     try:
-        response = await client.chat.completions.create(
-            model="meta-llama/llama-4-scout:free",
-            messages=[
-                {"role": "system", "content": "You are a planning assistant. Break the user's goal into clear, numbered, executable steps. Be specific about tools and actions. Output ONLY the numbered list, nothing else."},
-                {"role": "user", "content": f"Goal: {goal}"},
-            ],
-            timeout=30,
-        )
-        plan = response.choices[0].message.content or "Could not generate plan."
+        import llm_router
+        messages = [
+            {"role": "system", "content": "You are a planning assistant. Break the user's goal into clear, numbered, executable steps. Be specific about tools and actions. Output ONLY the numbered list, nothing else."},
+            {"role": "user", "content": f"Goal: {goal}"},
+        ]
+        result = await llm_router.chat_completion(messages, tools=[])
+        plan = result["response"].choices[0].message.content or "Could not generate plan."
         return {"output": f"📋 Execution Plan:\n{plan}", "image_path": None}
     except Exception as exc:
         return {"output": f"Planning error: {exc}", "image_path": None}
