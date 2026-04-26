@@ -45,12 +45,12 @@ def stop():
 
 # ── job runner ────────────────────────────────────────────────────────────────
 
-async def _run_task(task_description: str):
+async def _run_task(task_description: str, user_id: str = None):
     """Run agent for a scheduled task. Saves result + notifies user."""
     import db
     import agent as ag
 
-    session = await db.create_session()
+    session = await db.create_session(user_id=user_id)
     sid = session["id"]
     await db.update_session_title(sid, f"⏰ {task_description[:50]}")
 
@@ -60,7 +60,7 @@ async def _run_task(task_description: str):
             await _broadcast(payload)
 
     try:
-        await ag.run_agent(sid, task_description, _send)
+        await ag.run_agent(sid, task_description, _send, user_id=user_id)
     except Exception as exc:
         logger.error("Scheduled task failed: %s", exc)
 
@@ -93,17 +93,18 @@ def _parse_cron(expr: str) -> dict:
     return dict(minute=minute, hour=hour, day=day, month=month, day_of_week=day_of_week)
 
 
-def add_job(task_description: str, cron_expr: str) -> str:
+def add_job(task_description: str, cron_expr: str, user_id: str = None) -> str:
     job_id = f"task_{uuid.uuid4().hex[:8]}"
     _scheduler.add_job(
         _run_task,
         "cron",
         args=[task_description],
+        kwargs={"user_id": user_id},
         id=job_id,
         replace_existing=False,
         **_parse_cron(cron_expr),
     )
-    logger.info("Scheduled job %s: %r (%s)", job_id, task_description, cron_expr)
+    logger.info("Scheduled job %s: %r (%s) user=%s", job_id, task_description, cron_expr, user_id)
     return job_id
 
 

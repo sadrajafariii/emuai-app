@@ -1091,7 +1091,9 @@ async def schedule_task(task: str, cron: str) -> dict:
     """
     try:
         import scheduler as sched
-        job_id = sched.add_job(task, cron)
+        from agent import current_user_id
+        uid = current_user_id.get()
+        job_id = sched.add_job(task, cron, user_id=uid)
         return {"output": f"Task scheduled! ID: {job_id}\nTask: {task}\nSchedule: {cron}", "image_path": None}
     except Exception as exc:
         return {"output": f"Schedule error: {exc}", "image_path": None}
