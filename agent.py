@@ -236,6 +236,14 @@ async def run_agent(
     total_prompt_tokens     = 0
     total_completion_tokens = 0
 
+    # Task tracker
+    task_id = await db.create_task(
+        user_id or "anon", session_id,
+        user_text[:100] if isinstance(user_text, str) else "Agent task"
+    )
+    tool_calls_count  = 0
+    consecutive_fails = 0
+
     iterations = 0
 
     while iterations < max_iterations:
@@ -247,6 +255,7 @@ async def run_agent(
             result = await llm_router.chat_completion(messages, tools=TOOL_SCHEMAS, user_cfg=cfg if user_id else None)
         except RuntimeError as exc:
             await emit({"type": "error", "content": str(exc)})
+            asyncio.create_task(db.update_task(task_id, "failed", error=str(exc)[:300], tool_calls_count=tool_calls_count))
             return
 
         model_used  = result["model"]
@@ -311,6 +320,7 @@ async def run_agent(
                 },
             })
             await db.save_message(session_id, "assistant", content)
+            asyncio.create_task(db.update_task(task_id, "done", result=content[:500], tool_calls_count=tool_calls_count))
 
             # TTS: if enabled, tell the UI to speak the response
             if cfg.get("tts_enabled") and content:
@@ -353,6 +363,7 @@ async def run_agent(
 
             # ── track tool call in analytics ──────────────────────────────────
             asyncio.create_task(db.track_event("tool", tool_name=tool_name, session_id=session_id))
+            tool_calls_count += 1
 
             # ── notify UI: starting ───────────────────────────────────────────
             await emit({"type": "tool_start", "tool": tool_name, "args": tool_args})
@@ -363,6 +374,31 @@ async def run_agent(
             image_path  = tool_result.get("image_path")
             app_url     = tool_result.get("app_url")
             status      = _infer_status(tool_name, output_text)
+
+            # ── audit log ─────────────────────────────────────────────────────
+            args_summary = json.dumps(tool_args)[:300]
+            asyncio.create_task(db.log_audit(
+                user_id or "anon", session_id, tool_name,
+                args_summary, output_text[:500], status,
+            ))
+
+            # ── self-healing: inject error hint so agent retries smarter ──────
+            if status == "fail":
+                consecutive_fails += 1
+                output_text = (
+                    f"⚠ TOOL FAILED (attempt {consecutive_fails}):\n{output_text}\n\n"
+                    "Analyze this error carefully. Try a DIFFERENT approach — "
+                    "different command, fix syntax, install missing dependency, "
+                    "check if path/file exists first, use alternative method. "
+                    "Do NOT give up. Do NOT repeat the exact same call."
+                )
+                if consecutive_fails >= 3:
+                    await emit({
+                        "type": "warning",
+                        "content": f"Agent has failed {consecutive_fails} times in a row. Consider providing more context.",
+                    })
+            else:
+                consecutive_fails = 0
 
             await emit({
                 "type": "tool_result", "tool": tool_name,
@@ -382,6 +418,7 @@ async def run_agent(
                                       tool_call_id=tool_id, name=tool_name)
     else:
         await emit({"type": "error", "content": f"Reached max tool iterations ({max_iterations})."})
+        asyncio.create_task(db.update_task(task_id, "failed", error=f"Max iterations ({max_iterations}) reached", tool_calls_count=tool_calls_count))
 
 
 # ── permission system ─────────────────────────────────────────────────────────

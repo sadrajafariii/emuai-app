@@ -12,7 +12,7 @@ from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -535,6 +535,52 @@ async def track_event(request_body: dict):
         session_id = request_body.get("session_id"),
     )
     return JSONResponse({"ok": True})
+
+
+# ── Audit Log ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/audit")
+async def get_audit_log(request: Request, limit: int = 100):
+    user = get_current_user(request)
+    entries = await db.get_audit_log(user_id=user["id"], limit=min(limit, 500))
+    return JSONResponse({"entries": entries})
+
+
+# ── Secrets Vault ─────────────────────────────────────────────────────────────
+
+@app.get("/api/secrets")
+async def list_secrets(request: Request):
+    user = get_current_user(request)
+    secrets = await db.list_secrets(user["id"])
+    return JSONResponse({"secrets": secrets})
+
+
+@app.post("/api/secrets")
+async def store_secret(request: Request):
+    user = get_current_user(request)
+    body = await request.json()
+    name = (body.get("name") or "").strip().lower()
+    value = body.get("value") or ""
+    if not name or not value:
+        raise HTTPException(status_code=400, detail="name and value required")
+    await db.set_secret(user["id"], name, value)
+    return JSONResponse({"ok": True, "name": name})
+
+
+@app.delete("/api/secrets/{name}")
+async def delete_secret(request: Request, name: str):
+    user = get_current_user(request)
+    deleted = await db.delete_secret(user["id"], name)
+    return JSONResponse({"ok": deleted})
+
+
+# ── Task History ──────────────────────────────────────────────────────────────
+
+@app.get("/api/tasks")
+async def get_tasks(request: Request, limit: int = 50):
+    user = get_current_user(request)
+    tasks = await db.get_tasks(user_id=user["id"], limit=min(limit, 200))
+    return JSONResponse({"tasks": tasks})
 
 
 # ── Personas ─────────────────────────────────────────────────────────────────

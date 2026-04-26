@@ -1,9 +1,29 @@
 import aiosqlite
+import base64
+import hashlib
 import json
+import os
 import uuid
 from datetime import datetime
 
 import settings_store
+
+
+# ── Encryption helpers for secrets vault ──────────────────────────────────────
+
+def _fernet():
+    from cryptography.fernet import Fernet
+    secret = os.getenv("JWT_SECRET", "bud-jwt-secret-please-change-in-production")
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
+    return Fernet(key)
+
+
+def _encrypt(value: str) -> str:
+    return _fernet().encrypt(value.encode()).decode()
+
+
+def _decrypt(token: str) -> str:
+    return _fernet().decrypt(token.encode()).decode()
 
 DB_PATH = "emulaiator.db"
 
@@ -76,6 +96,39 @@ async def init_db():
                 description TEXT,
                 command TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                session_id TEXT,
+                tool_name TEXT NOT NULL,
+                args_summary TEXT,
+                result_summary TEXT,
+                status TEXT DEFAULT 'info',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS secrets (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                encrypted_value TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(user_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                session_id TEXT,
+                title TEXT NOT NULL,
+                status TEXT DEFAULT 'running',
+                result TEXT,
+                error TEXT,
+                tool_calls_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
             );
         """)
 
@@ -582,3 +635,130 @@ async def delete_custom_tool(tool_id: str, user_id: str = None) -> bool:
             cur = await db.execute("DELETE FROM custom_tools WHERE id=?", (tool_id,))
         await db.commit()
         return cur.rowcount > 0
+
+
+# ── Audit Log ─────────────────────────────────────────────────────────────────
+
+async def log_audit(user_id: str, session_id: str, tool_name: str,
+                    args_summary: str, result_summary: str, status: str = "info"):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO audit_log (user_id, session_id, tool_name, args_summary, result_summary, status)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, session_id, tool_name,
+             args_summary[:300] if args_summary else None,
+             result_summary[:500] if result_summary else None,
+             status),
+        )
+        await db.commit()
+
+
+async def get_audit_log(user_id: str = None, limit: int = 100) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if user_id:
+            async with db.execute(
+                "SELECT * FROM audit_log WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                (user_id, limit),
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
+            ) as cur:
+                rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Secrets Vault ─────────────────────────────────────────────────────────────
+
+async def set_secret(user_id: str, name: str, value: str):
+    encrypted = _encrypt(value)
+    secret_id = str(uuid.uuid4())
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO secrets (id, user_id, name, encrypted_value)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(user_id, name) DO UPDATE SET encrypted_value=excluded.encrypted_value""",
+            (secret_id, user_id, name.strip().lower(), encrypted),
+        )
+        await db.commit()
+
+
+async def get_secret(user_id: str, name: str) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT encrypted_value FROM secrets WHERE user_id=? AND name=?",
+            (user_id, name.strip().lower()),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return None
+    try:
+        return _decrypt(row["encrypted_value"])
+    except Exception:
+        return None
+
+
+async def list_secrets(user_id: str) -> list[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT name, created_at FROM secrets WHERE user_id=? ORDER BY name",
+            (user_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [{"name": r["name"], "created_at": r["created_at"]} for r in rows]
+
+
+async def delete_secret(user_id: str, name: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "DELETE FROM secrets WHERE user_id=? AND name=?",
+            (user_id, name.strip().lower()),
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
+# ── Task Tracker ──────────────────────────────────────────────────────────────
+
+async def create_task(user_id: str, session_id: str, title: str) -> str:
+    task_id = str(uuid.uuid4())
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO tasks (id, user_id, session_id, title) VALUES (?, ?, ?, ?)",
+            (task_id, user_id, session_id, title[:200]),
+        )
+        await db.commit()
+    return task_id
+
+
+async def update_task(task_id: str, status: str, result: str = None,
+                      error: str = None, tool_calls_count: int = 0):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """UPDATE tasks SET status=?, result=?, error=?, tool_calls_count=?,
+               updated_at=datetime('now') WHERE id=?""",
+            (status, result[:500] if result else None,
+             error[:300] if error else None, tool_calls_count, task_id),
+        )
+        await db.commit()
+
+
+async def get_tasks(user_id: str = None, limit: int = 50) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if user_id:
+            async with db.execute(
+                "SELECT * FROM tasks WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,)
+            ) as cur:
+                rows = await cur.fetchall()
+    return [dict(r) for r in rows]

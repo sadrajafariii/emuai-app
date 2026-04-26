@@ -1152,6 +1152,44 @@ async def read_pdf(path: str) -> dict:
 
 # ── tool: RAG vault ──────────────────────────────────────────────────────────
 
+async def get_secret(name: str) -> dict:
+    """Retrieve a secret the user stored in their personal secrets vault."""
+    import db as _db
+    from agent import current_user_id
+    uid = current_user_id.get()
+    if not uid:
+        return {"output": "No user session — cannot access secrets.", "image_path": None}
+    value = await _db.get_secret(uid, name)
+    if value is None:
+        return {"output": f"Secret '{name}' not found. Ask the user to store it first with set_secret().", "image_path": None}
+    return {"output": value, "image_path": None}
+
+
+async def set_secret(name: str, value: str) -> dict:
+    """Store a secret in the user's encrypted personal vault."""
+    import db as _db
+    from agent import current_user_id
+    uid = current_user_id.get()
+    if not uid:
+        return {"output": "No user session — cannot store secrets.", "image_path": None}
+    await _db.set_secret(uid, name, value)
+    return {"output": f"Secret '{name}' stored securely.", "image_path": None}
+
+
+async def list_secrets() -> dict:
+    """List the names of all secrets stored in the user's vault (values are never shown)."""
+    import db as _db
+    from agent import current_user_id
+    uid = current_user_id.get()
+    if not uid:
+        return {"output": "No user session.", "image_path": None}
+    secrets = await _db.list_secrets(uid)
+    if not secrets:
+        return {"output": "No secrets stored yet.", "image_path": None}
+    lines = [f"• {s['name']} (saved {s['created_at'][:10]})" for s in secrets]
+    return {"output": "Stored secrets:\n" + "\n".join(lines), "image_path": None}
+
+
 async def vault_add(content: str, title: str) -> dict:
     """Save a document to the personal knowledge vault."""
     import db
@@ -1926,6 +1964,45 @@ TOOL_SCHEMAS = [
         },
     },
 
+    # ── Secrets vault ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_secret",
+            "description": "Retrieve a secret (API key, password, token) from the user's encrypted personal vault by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The name/key of the secret (e.g. 'twitter_password', 'openai_key')"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_secret",
+            "description": "Store a secret (API key, password, token) in the user's encrypted personal vault.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name":  {"type": "string", "description": "A short name for this secret (e.g. 'twitter_password')"},
+                    "value": {"type": "string", "description": "The secret value to store"},
+                },
+                "required": ["name", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_secrets",
+            "description": "List the names of all secrets stored in the user's vault. Does not reveal values.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+
     # ── Git tools ─────────────────────────────────────────────────────────────
     {
         "type": "function",
@@ -2113,6 +2190,10 @@ TOOL_MAP = {
     "vault_search": vault_search,
     "vault_list":   vault_list,
     "vault_delete": vault_delete,
+    # Secrets vault
+    "get_secret":   get_secret,
+    "set_secret":   set_secret,
+    "list_secrets": list_secrets,
     # Browser control
     "browser_navigate":   browser_navigate,
     "browser_screenshot": browser_screenshot,
