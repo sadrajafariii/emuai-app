@@ -169,6 +169,14 @@ def _build_system_prompt(cfg: dict) -> str:
     return prompt
 
 
+def stop_agent(session_id: str):
+    task = _active_tasks.get(session_id)
+    if task and not task.done():
+        task.cancel()
+        return True
+    return False
+
+
 async def run_agent(
     session_id: str,
     user_message: str,

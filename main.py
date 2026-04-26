@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 import db
 import settings_store
-from agent import run_agent, resolve_permission, reset_session_permissions
+from agent import run_agent, resolve_permission, reset_session_permissions, stop_agent, _active_tasks
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, get_user_from_ws,
@@ -904,12 +904,18 @@ async def websocket_endpoint(ws: WebSocket):
                 if not sid or not content:
                     await send({"type": "error", "content": "session_id and content required"})
                     continue
-                asyncio.create_task(run_agent(sid, content, send, user_id=user_id))
+                task = asyncio.create_task(run_agent(sid, content, send, user_id=user_id))
+                _active_tasks[sid] = task
 
                 async def _refresh():
                     await asyncio.sleep(0.5)
                     await send({"type": "sessions", "sessions": await db.get_sessions(user_id=user_id)})
                 asyncio.create_task(_refresh())
+
+            elif msg_type == "stop":
+                sid = data.get("session_id")
+                if sid and stop_agent(sid):
+                    await send({"type": "stopped", "session_id": sid})
 
             elif msg_type == "permission_response":
                 sid     = data.get("session_id")

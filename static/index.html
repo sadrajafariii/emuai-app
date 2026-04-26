@@ -969,11 +969,17 @@
               </svg>
             </button>
 
-            <!-- Send button -->
+            <!-- Send / Stop button -->
             <button id="send-btn" onclick="sendMessage()"
               class="flex-shrink-0 p-2 rounded-lg bg-gold text-bg hover:bg-goldh disabled:opacity-40 disabled:cursor-not-allowed transition-colors self-end">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+            </button>
+            <button id="stop-btn" onclick="stopAgent()" title="Stop"
+              style="display:none;flex-shrink:0;padding:.5rem;border-radius:.5rem;background:#5a1a1a;border:1px solid #a33;color:#f88;cursor:pointer;align-self:flex-end;">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
               </svg>
             </button>
           </div>
@@ -1408,7 +1414,9 @@ function finalizeMessage(tokenUsage) {
   }
   setStatus('Idle', false);
   isThinking = false;
+  document.getElementById('send-btn').style.display = '';
   document.getElementById('send-btn').disabled = false;
+  document.getElementById('stop-btn').style.display = 'none';
   document.getElementById('user-input').disabled = false;
   document.getElementById('live-dot').classList.add('hidden');
   document.getElementById('browser-action').classList.add('hidden');
@@ -1483,10 +1491,17 @@ function sendMessage() {
   closeTemplates();
   appendUserMessage(text);
   isThinking = true;
-  document.getElementById('send-btn').disabled = true;
+  document.getElementById('send-btn').style.display = 'none';
+  document.getElementById('stop-btn').style.display = 'flex';
   document.getElementById('user-input').disabled = true;
   setStatus('Thinking…', true);
   ws.send(JSON.stringify({ type: 'message', session_id: currentSessionId, content: text }));
+}
+
+function stopAgent() {
+  if (!currentSessionId) return;
+  ws.send(JSON.stringify({ type: 'stop', session_id: currentSessionId }));
+  _agentDone();
 }
 
 function handleKey(e) {
@@ -1737,7 +1752,9 @@ function renderError(msg) {
   feed.scrollTop = feed.scrollHeight;
   setStatus('Idle', false);
   isThinking = false;
+  document.getElementById('send-btn').style.display = '';
   document.getElementById('send-btn').disabled = false;
+  document.getElementById('stop-btn').style.display = 'none';
   document.getElementById('user-input').disabled = false;
 }
 
