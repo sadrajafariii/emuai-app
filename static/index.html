@@ -480,6 +480,10 @@
       <div class="settings-nav-item" data-section="personas" onclick="switchSettingsTab('personas');loadPersonas()">Personas</div>
       <div class="settings-nav-item" data-section="memorybrowser" onclick="switchSettingsTab('memorybrowser');loadMemoryBrowser()">Memory</div>
       <div class="settings-nav-item" data-section="commands" onclick="switchSettingsTab('commands');loadCommands()">Commands</div>
+      <div class="settings-nav-item" data-section="webhooks" onclick="switchSettingsTab('webhooks');loadWebhooks()">Webhooks</div>
+      <div class="settings-nav-item" data-section="tasks" onclick="switchSettingsTab('tasks');loadTaskHistory()">Tasks</div>
+      <div class="settings-nav-item" data-section="cost" onclick="switchSettingsTab('cost');loadCost()">Usage</div>
+      <div class="settings-nav-item" data-section="secrets" onclick="switchSettingsTab('secrets');loadSecretsUI()">Secrets</div>
     </div>
 
     <!-- Content -->
@@ -743,6 +747,57 @@
             <textarea id="new-cmd-prompt" class="settings-input" rows="3" placeholder="The prompt text…" style="min-height:60px;max-height:160px;resize:vertical;"></textarea>
           </div>
           <button onclick="saveNewCommand()" class="settings-save-btn" style="margin-top:0;">Save Command</button>
+        </div>
+      </div>
+
+      <!-- Webhooks -->
+      <div class="settings-section" id="section-webhooks">
+        <p class="text-xs text-muted mb-4">Webhooks let external services trigger your agent. Send a POST to the webhook URL to start a task.</p>
+        <div id="webhooks-list" class="space-y-2 mb-5"></div>
+        <div class="rounded-lg p-4 mb-4" style="background:#0e0c0a;border:1px solid #2a2520;">
+          <p class="settings-label mb-3">Create Webhook</p>
+          <div class="mb-2">
+            <p class="text-xs text-faint mb-1">Name</p>
+            <input id="wh-name" class="settings-input" placeholder="e.g. Morning brief" />
+          </div>
+          <div class="mb-3">
+            <p class="text-xs text-faint mb-1">Agent prompt (use {body} for POST body data)</p>
+            <textarea id="wh-prompt" class="settings-input" rows="3" style="min-height:60px;resize:vertical;" placeholder="Search the web for {body} and send me a summary"></textarea>
+          </div>
+          <button onclick="createWebhook()" class="settings-save-btn" style="margin-top:0;">Create Webhook</button>
+        </div>
+      </div>
+
+      <!-- Task History -->
+      <div class="settings-section" id="section-tasks">
+        <p class="text-xs text-muted mb-4">Recent agent tasks — running, completed, and failed.</p>
+        <div id="tasks-list" class="space-y-2"></div>
+      </div>
+
+      <!-- Cost / Usage -->
+      <div class="settings-section" id="section-cost">
+        <p class="text-xs text-muted mb-4">Token usage across all sessions. Free OpenRouter models cost $0.</p>
+        <div id="cost-summary" class="mb-4 p-3 rounded-lg" style="background:#0e0c0a;border:1px solid #2a2520;">
+          <p class="text-xs text-faint">Loading…</p>
+        </div>
+        <div id="cost-by-model" class="space-y-2"></div>
+      </div>
+
+      <!-- Secrets Vault -->
+      <div class="settings-section" id="section-secrets">
+        <p class="text-xs text-muted mb-4">Encrypted credentials stored in your vault. The agent can use these to log in to sites without you typing passwords each time.</p>
+        <div id="secrets-list" class="space-y-2 mb-5"></div>
+        <div class="rounded-lg p-4" style="background:#0e0c0a;border:1px solid #2a2520;">
+          <p class="settings-label mb-3">Store New Secret</p>
+          <div class="mb-2">
+            <p class="text-xs text-faint mb-1">Name (e.g. twitter_password)</p>
+            <input id="sec-name" class="settings-input" placeholder="secret_name" />
+          </div>
+          <div class="mb-3">
+            <p class="text-xs text-faint mb-1">Value</p>
+            <input id="sec-value" class="settings-input" type="password" placeholder="••••••••" />
+          </div>
+          <button onclick="storeSecret()" class="settings-save-btn" style="margin-top:0;">Store Secret</button>
         </div>
       </div>
 
@@ -3082,10 +3137,137 @@ function _mergeCustomCommandsIntoTemplates() {
   const _orig = switchSettingsTab;
   switchSettingsTab = function(tab) {
     _orig(tab);
-    const extra = { personas: 'Personas', memorybrowser: 'Memory Browser', commands: 'Slash Commands' };
+    const extra = { personas: 'Personas', memorybrowser: 'Memory Browser', commands: 'Slash Commands',
+                    webhooks: 'Webhooks', tasks: 'Task History', cost: 'Usage & Cost', secrets: 'Secrets Vault' };
     if (extra[tab]) document.getElementById('settings-section-title').textContent = extra[tab];
   };
 })();
+
+// Auth headers — cookies are sent automatically, so this is just a no-op helper
+function authHeaders() { return {}; }
+
+// ── Webhooks UI ───────────────────────────────────────────────────────────────
+async function loadWebhooks() {
+  const el = document.getElementById('webhooks-list');
+  try {
+    const { webhooks } = await (await fetch('/api/webhooks', { headers: authHeaders() })).json();
+    if (!webhooks.length) { el.innerHTML = '<p class="text-xs text-faint">No webhooks yet.</p>'; return; }
+    const origin = location.origin;
+    el.innerHTML = webhooks.map(w => `
+      <div class="rounded-lg p-3" style="background:#0e0c0a;border:1px solid #2a2520;">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm text-cream font-medium">${w.name}</p>
+            <p class="text-xs text-faint mt-1 break-all" style="font-family:monospace;">${origin}/webhook/${w.token}</p>
+            <p class="text-xs text-muted mt-1 truncate">${w.prompt_template}</p>
+          </div>
+          <button onclick="copyWebhookUrl('${origin}/webhook/${w.token}')" class="text-xs text-gold hover:text-goldh flex-shrink-0" title="Copy URL">Copy</button>
+          <button onclick="deleteWebhook('${w.id}')" class="text-xs text-faint hover:text-red-400 flex-shrink-0" title="Delete">✕</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { el.innerHTML = '<p class="text-xs text-faint">Failed to load.</p>'; }
+}
+
+function copyWebhookUrl(url) {
+  navigator.clipboard.writeText(url).then(() => alert('Copied: ' + url));
+}
+
+async function createWebhook() {
+  const name = document.getElementById('wh-name').value.trim();
+  const prompt_template = document.getElementById('wh-prompt').value.trim();
+  if (!name || !prompt_template) { alert('Fill in both fields.'); return; }
+  try {
+    const r = await fetch('/api/webhooks', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ name, prompt_template }) });
+    if (!r.ok) { alert('Error creating webhook.'); return; }
+    document.getElementById('wh-name').value = '';
+    document.getElementById('wh-prompt').value = '';
+    loadWebhooks();
+  } catch(e) { alert('Network error.'); }
+}
+
+async function deleteWebhook(id) {
+  if (!confirm('Delete this webhook?')) return;
+  await fetch(`/api/webhooks/${id}`, { method: 'DELETE', headers: authHeaders() });
+  loadWebhooks();
+}
+
+// ── Task History UI ───────────────────────────────────────────────────────────
+async function loadTaskHistory() {
+  const el = document.getElementById('tasks-list');
+  try {
+    const { tasks } = await (await fetch('/api/tasks', { headers: authHeaders() })).json();
+    if (!tasks.length) { el.innerHTML = '<p class="text-xs text-faint">No tasks yet.</p>'; return; }
+    const statusColor = { running: '#c8a45e', done: '#4caf7d', failed: '#e57373' };
+    el.innerHTML = tasks.map(t => `
+      <div class="rounded-lg p-3" style="background:#0e0c0a;border:1px solid #2a2520;">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-sm text-cream truncate flex-1">${t.title}</p>
+          <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0" style="background:${statusColor[t.status]}22;color:${statusColor[t.status]}">${t.status}</span>
+        </div>
+        <p class="text-xs text-faint mt-1">${new Date(t.created_at).toLocaleString()} · ${t.tool_calls_count} tool calls</p>
+        ${t.error ? `<p class="text-xs mt-1" style="color:#e57373">${t.error}</p>` : ''}
+      </div>`).join('');
+  } catch(e) { el.innerHTML = '<p class="text-xs text-faint">Failed to load.</p>'; }
+}
+
+// ── Cost / Usage UI ───────────────────────────────────────────────────────────
+async function loadCost() {
+  try {
+    const data = await (await fetch('/api/cost', { headers: authHeaders() })).json();
+    const summary = document.getElementById('cost-summary');
+    const total_tokens = (data.by_model || []).reduce((s, m) => s + (m.prompt_tokens || 0) + (m.completion_tokens || 0), 0);
+    const total_calls  = (data.by_model || []).reduce((s, m) => s + (m.calls || 0), 0);
+    summary.innerHTML = `
+      <p class="text-sm text-cream">Total cost: <span class="text-gold font-mono">$${(data.total_usd || 0).toFixed(6)}</span></p>
+      <p class="text-xs text-faint mt-1">${total_tokens.toLocaleString()} tokens · ${total_calls} LLM calls</p>`;
+    const byModel = document.getElementById('cost-by-model');
+    if (!data.by_model?.length) { byModel.innerHTML = '<p class="text-xs text-faint">No usage yet.</p>'; return; }
+    byModel.innerHTML = data.by_model.map(m => `
+      <div class="rounded-lg p-3" style="background:#0e0c0a;border:1px solid #2a2520;">
+        <p class="text-xs text-cream font-mono truncate">${m.model}</p>
+        <p class="text-xs text-faint mt-1">${((m.prompt_tokens||0)+(m.completion_tokens||0)).toLocaleString()} tokens · ${m.calls} calls · $${(m.cost_usd||0).toFixed(6)}</p>
+      </div>`).join('');
+  } catch(e) { document.getElementById('cost-summary').innerHTML = '<p class="text-xs text-faint">Failed to load.</p>'; }
+}
+
+// ── Secrets Vault UI ──────────────────────────────────────────────────────────
+async function loadSecretsUI() {
+  const el = document.getElementById('secrets-list');
+  try {
+    const { secrets } = await (await fetch('/api/secrets', { headers: authHeaders() })).json();
+    if (!secrets.length) { el.innerHTML = '<p class="text-xs text-faint">No secrets stored yet.</p>'; return; }
+    el.innerHTML = secrets.map(s => `
+      <div class="rounded-lg p-3 flex items-center justify-between" style="background:#0e0c0a;border:1px solid #2a2520;">
+        <div>
+          <p class="text-sm text-cream font-mono">${s.name}</p>
+          <p class="text-xs text-faint mt-0.5">Stored ${new Date(s.created_at).toLocaleDateString()}</p>
+        </div>
+        <button onclick="deleteSecretUI('${s.name}')" class="text-xs text-faint hover:text-red-400" title="Delete">✕</button>
+      </div>`).join('');
+  } catch(e) { el.innerHTML = '<p class="text-xs text-faint">Failed to load.</p>'; }
+}
+
+async function storeSecret() {
+  const name = document.getElementById('sec-name').value.trim().toLowerCase().replace(/\s+/g,'_');
+  const value = document.getElementById('sec-value').value;
+  if (!name || !value) { alert('Both name and value are required.'); return; }
+  try {
+    const r = await fetch('/api/secrets', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ name, value }) });
+    if (!r.ok) { alert('Error storing secret.'); return; }
+    document.getElementById('sec-name').value = '';
+    document.getElementById('sec-value').value = '';
+    loadSecretsUI();
+  } catch(e) { alert('Network error.'); }
+}
+
+async function deleteSecretUI(name) {
+  if (!confirm(`Delete secret "${name}"?`)) return;
+  await fetch(`/api/secrets/${encodeURIComponent(name)}`, { method: 'DELETE', headers: authHeaders() });
+  loadSecretsUI();
+}
 
 // Load custom commands into templates on startup
 (async function initCustomCommands() {

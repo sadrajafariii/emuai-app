@@ -189,6 +189,32 @@ Use this to store X/Twitter passwords, API keys, etc. so you can reuse them acro
 - workflow_list() — list saved workflows
 - workflow_run(workflow_name) — replay a workflow
 
+## HTTP & APIs
+- http_request(method, url, headers, body, params) — call any REST API or HTTP endpoint
+
+## Data & Files
+- analyze_data(path) — load CSV/JSON from workspace and show stats + preview
+- diff_files(path_a, path_b) — compare two workspace files, show unified diff
+- zip_files(output_name, files) — create a zip archive
+- unzip_file(zip_path) — extract a zip archive
+- regex_extract(text, pattern) — extract all regex matches
+- regex_replace(text, pattern, replacement) — find and replace with regex
+- format_json(text) — validate and pretty-print JSON
+- count_words(text) — word, char, sentence, paragraph stats + read time
+
+## Text Processing
+- translate_text(text, target_language) — translate to any language (es, fr, de, zh, ja, ar, ru...)
+- summarize_text(text, style) — AI summarization: bullets | paragraph | tldr
+- encode_decode(text, operation) — base64/url/hex encode or decode
+- hash_text(text, algorithm) — md5, sha1, sha256, sha512
+- markdown_to_html(markdown, title) — convert Markdown to styled HTML preview
+
+## Utilities
+- generate_qr(content) — create a QR code image
+- shorten_url(url) — shorten any URL via TinyURL
+- set_reminder(message, seconds) — desktop notification after N seconds
+- browser_read_full_page(max_scrolls) — scroll entire page and collect all text
+
 Respond in Markdown when it improves readability."""
 
 _AUTO_MEMORY_ADDON = """

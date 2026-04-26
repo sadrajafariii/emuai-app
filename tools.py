@@ -1685,6 +1685,361 @@ async def check_site_changed(url: str) -> dict:
         return {"output": f"Site check error: {exc}", "image_path": None}
 
 
+# ── tool: HTTP request ───────────────────────────────────────────────────────
+
+async def http_request(method: str, url: str, headers: dict = None,
+                       body: str = None, params: dict = None) -> dict:
+    """Make an arbitrary HTTP request and return the response."""
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.request(
+                method.upper(), url,
+                headers=headers or {},
+                content=body.encode() if body else None,
+                params=params or {},
+            )
+        content_type = resp.headers.get("content-type", "")
+        try:
+            body_text = resp.json() if "json" in content_type else resp.text
+            if isinstance(body_text, (dict, list)):
+                body_text = json.dumps(body_text, indent=2)
+        except Exception:
+            body_text = resp.text
+        return {
+            "output": f"HTTP {method.upper()} {url}\nStatus: {resp.status_code}\n\n{str(body_text)[:3000]}",
+            "image_path": None,
+        }
+    except Exception as exc:
+        return {"output": f"HTTP request error: {exc}", "image_path": None}
+
+
+# ── tool: CSV / JSON analyzer ─────────────────────────────────────────────────
+
+async def analyze_data(path: str, query: str = "") -> dict:
+    """Load a CSV or JSON file from the workspace and return stats + preview."""
+    try:
+        import csv, io
+        file_path = _safe_path(path)
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+        ext = file_path.suffix.lower()
+        if ext == ".json":
+            data = json.loads(text)
+            if isinstance(data, list):
+                rows = len(data)
+                keys = list(data[0].keys()) if data else []
+                preview = json.dumps(data[:5], indent=2)
+                return {"output": f"JSON array: {rows} records\nFields: {keys}\n\nFirst 5:\n{preview}", "image_path": None}
+            return {"output": f"JSON object:\n{json.dumps(data, indent=2)[:3000]}", "image_path": None}
+        elif ext in (".csv", ".tsv"):
+            sep = "\t" if ext == ".tsv" else ","
+            reader = csv.DictReader(io.StringIO(text), delimiter=sep)
+            rows = list(reader)
+            if not rows:
+                return {"output": "Empty file.", "image_path": None}
+            cols = list(rows[0].keys())
+            # Basic stats for numeric cols
+            stats = {}
+            for col in cols:
+                vals = []
+                for r in rows:
+                    try: vals.append(float(r[col]))
+                    except Exception: pass
+                if vals:
+                    stats[col] = {"min": min(vals), "max": max(vals),
+                                  "avg": round(sum(vals)/len(vals), 4), "count": len(vals)}
+            preview = "\n".join([",".join(str(r.get(c,"")) for c in cols) for r in rows[:10]])
+            stats_str = json.dumps(stats, indent=2) if stats else "No numeric columns"
+            return {"output": f"CSV: {len(rows)} rows × {len(cols)} cols\nColumns: {cols}\n\nStats:\n{stats_str}\n\nFirst 10 rows:\n{preview}", "image_path": None}
+        else:
+            return {"output": f"Unsupported format '{ext}'. Use .csv, .tsv, or .json.", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Data analysis error: {exc}", "image_path": None}
+
+
+# ── tool: diff files ──────────────────────────────────────────────────────────
+
+async def diff_files(path_a: str, path_b: str) -> dict:
+    """Compare two workspace files line-by-line and return a unified diff."""
+    try:
+        import difflib
+        text_a = _safe_path(path_a).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        text_b = _safe_path(path_b).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        diff = list(difflib.unified_diff(text_a, text_b, fromfile=path_a, tofile=path_b, n=3))
+        if not diff:
+            return {"output": "Files are identical.", "image_path": None}
+        return {"output": "```diff\n" + "".join(diff[:200]) + "\n```", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Diff error: {exc}", "image_path": None}
+
+
+# ── tool: zip / unzip ─────────────────────────────────────────────────────────
+
+async def zip_files(output_name: str, files: list) -> dict:
+    """Create a zip archive of workspace files."""
+    import zipfile
+    try:
+        out = _safe_path(output_name if output_name.endswith(".zip") else output_name + ".zip")
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in files:
+                p = _safe_path(f)
+                if p.exists():
+                    zf.write(p, p.name)
+        return {"output": f"Created {out.name} with {len(files)} file(s). Size: {out.stat().st_size:,} bytes", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Zip error: {exc}", "image_path": None}
+
+
+async def unzip_file(zip_path: str, output_dir: str = "") -> dict:
+    """Extract a zip archive into the workspace."""
+    import zipfile
+    try:
+        src = _safe_path(zip_path)
+        dest = _safe_path(output_dir) if output_dir else WORKSPACE
+        dest.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(src, "r") as zf:
+            names = zf.namelist()
+            zf.extractall(dest)
+        return {"output": f"Extracted {len(names)} files to {dest.name}/:\n" + "\n".join(names[:20]), "image_path": None}
+    except Exception as exc:
+        return {"output": f"Unzip error: {exc}", "image_path": None}
+
+
+# ── tool: regex ───────────────────────────────────────────────────────────────
+
+async def regex_extract(text: str, pattern: str, flags: str = "") -> dict:
+    """Extract all regex matches from text."""
+    try:
+        f = 0
+        if "i" in flags: f |= re.IGNORECASE
+        if "m" in flags: f |= re.MULTILINE
+        matches = re.findall(pattern, text, f)
+        if not matches:
+            return {"output": f"No matches found for pattern: `{pattern}`", "image_path": None}
+        return {"output": f"Found {len(matches)} match(es):\n" + "\n".join(repr(m) for m in matches[:50]), "image_path": None}
+    except re.error as exc:
+        return {"output": f"Regex error: {exc}", "image_path": None}
+
+
+async def regex_replace(text: str, pattern: str, replacement: str, flags: str = "") -> dict:
+    """Replace regex matches in text and return the result."""
+    try:
+        f = 0
+        if "i" in flags: f |= re.IGNORECASE
+        if "m" in flags: f |= re.MULTILINE
+        result, count = re.subn(pattern, replacement, text, flags=f)
+        return {"output": f"Replaced {count} occurrence(s).\n\nResult:\n{result[:3000]}", "image_path": None}
+    except re.error as exc:
+        return {"output": f"Regex error: {exc}", "image_path": None}
+
+
+# ── tool: full page reader (scroll + collect) ─────────────────────────────────
+
+async def browser_read_full_page(max_scrolls: int = 10) -> dict:
+    """Scroll through the entire page collecting all visible text, then return it combined."""
+    from browser_session import browser
+    try:
+        all_text = []
+        seen = set()
+        for i in range(max(1, min(max_scrolls, 20))):
+            chunk = await browser._page.evaluate("""() =>
+                Array.from(document.querySelectorAll('p,h1,h2,h3,h4,li,td,th,article,section'))
+                .map(e => e.innerText?.trim()).filter(t => t && t.length > 10).join('\\n')
+            """)
+            for line in chunk.split("\n"):
+                if line not in seen:
+                    seen.add(line)
+                    all_text.append(line)
+            await browser._page.evaluate("window.scrollBy(0, 800)")
+            await browser._page.wait_for_timeout(400)
+        return {"output": f"Full page content ({len(all_text)} lines):\n" + "\n".join(all_text)[:8000], "image_path": None}
+    except Exception as exc:
+        return {"output": f"Full page read error: {exc}", "image_path": None}
+
+
+# ── tool: translate ───────────────────────────────────────────────────────────
+
+async def translate_text(text: str, target_language: str, source_language: str = "auto") -> dict:
+    """Translate text to any language using a free translation API."""
+    try:
+        params = {"q": text, "langpair": f"{source_language}|{target_language}", "de": "agent@emuai.org"}
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get("https://api.mymemory.translated.net/get", params=params)
+        data = r.json()
+        translated = data.get("responseData", {}).get("translatedText", "")
+        if not translated:
+            return {"output": "Translation failed.", "image_path": None}
+        return {"output": f"**Translation ({source_language} → {target_language}):**\n\n{translated}", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Translation error: {exc}", "image_path": None}
+
+
+# ── tool: QR code generator ───────────────────────────────────────────────────
+
+async def generate_qr(content: str, filename: str = "qrcode.png") -> dict:
+    """Generate a QR code image for any text or URL."""
+    try:
+        import qrcode, io
+        qr = qrcode.QRCode(box_size=10, border=4)
+        qr.add_data(content)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        png = buf.getvalue()
+        dest = WORKSPACE / filename
+        dest.write_bytes(png)
+        img_path = _save_screenshot(png)
+        return {"output": f"QR code generated for: {content}\nSaved to workspace/{filename}", "image_path": img_path}
+    except ImportError:
+        return {"output": "qrcode not installed. Run: pip install qrcode[pil]", "image_path": None}
+    except Exception as exc:
+        return {"output": f"QR code error: {exc}", "image_path": None}
+
+
+# ── tool: URL shortener ───────────────────────────────────────────────────────
+
+async def shorten_url(url: str) -> dict:
+    """Shorten a URL using the free TinyURL API."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"https://tinyurl.com/api-create.php?url={urllib.parse.quote(url)}")
+        short = r.text.strip()
+        if short.startswith("http"):
+            return {"output": f"Shortened URL: {short}\nOriginal: {url}", "image_path": None}
+        return {"output": f"Could not shorten URL: {r.text}", "image_path": None}
+    except Exception as exc:
+        return {"output": f"URL shortener error: {exc}", "image_path": None}
+
+
+# ── tool: JSON formatter / validator ─────────────────────────────────────────
+
+async def format_json(text: str) -> dict:
+    """Parse, validate, and pretty-print JSON. Also shows structure summary."""
+    try:
+        data = json.loads(text)
+        pretty = json.dumps(data, indent=2, ensure_ascii=False)
+        if isinstance(data, list):
+            summary = f"Array with {len(data)} items"
+        elif isinstance(data, dict):
+            summary = f"Object with {len(data)} keys: {list(data.keys())[:10]}"
+        else:
+            summary = f"Value: {type(data).__name__}"
+        return {"output": f"Valid JSON ✓ — {summary}\n\n```json\n{pretty[:3000]}\n```", "image_path": None}
+    except json.JSONDecodeError as exc:
+        return {"output": f"Invalid JSON: {exc}", "image_path": None}
+
+
+# ── tool: markdown to HTML ────────────────────────────────────────────────────
+
+async def markdown_to_html(markdown: str, title: str = "Document") -> dict:
+    """Convert Markdown text to a styled HTML page and preview it."""
+    try:
+        import markdown as md_lib
+        html_body = md_lib.markdown(markdown, extensions=["tables", "fenced_code", "codehilite"])
+    except ImportError:
+        # Fallback: basic conversion
+        html_body = markdown.replace("\n\n", "</p><p>").replace("\n", "<br>")
+        html_body = f"<p>{html_body}</p>"
+    html = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>
+<title>{title}</title>
+<style>body{{font-family:Georgia,serif;max-width:800px;margin:40px auto;padding:0 20px;
+line-height:1.7;color:#1a1a1a;}}h1,h2,h3{{color:#1a1a1a;}}
+code{{background:#f4f4f4;padding:2px 6px;border-radius:3px;font-family:monospace;}}
+pre code{{display:block;padding:16px;overflow-x:auto;}}
+blockquote{{border-left:4px solid #ddd;margin:0;padding-left:20px;color:#666;}}
+table{{border-collapse:collapse;width:100%;}}td,th{{border:1px solid #ddd;padding:8px;}}
+</style></head><body><h1>{title}</h1>{html_body}</body></html>"""
+    return await serve_html_app(html, title)
+
+
+# ── tool: countdown / reminder ────────────────────────────────────────────────
+
+async def set_reminder(message: str, seconds: int) -> dict:
+    """Set a reminder that fires after N seconds with a desktop notification."""
+    async def _fire():
+        await asyncio.sleep(max(1, min(seconds, 86400)))
+        await notify_desktop("⏰ Reminder", message)
+    asyncio.create_task(_fire())
+    return {"output": f"Reminder set for {seconds}s from now: '{message}'", "image_path": None}
+
+
+# ── tool: text summarizer ─────────────────────────────────────────────────────
+
+async def summarize_text(text: str, style: str = "bullets") -> dict:
+    """Summarize long text using the LLM. style: bullets | paragraph | tldr"""
+    try:
+        import llm_router
+        styles = {
+            "bullets": "Summarize the following text as 5-10 concise bullet points:",
+            "paragraph": "Write a 2-3 paragraph summary of the following text:",
+            "tldr": "Write a single sentence TL;DR for the following text:",
+        }
+        prompt = styles.get(style, styles["bullets"])
+        messages = [
+            {"role": "system", "content": "You are a summarization assistant."},
+            {"role": "user", "content": f"{prompt}\n\n{text[:8000]}"},
+        ]
+        result = await llm_router.chat_completion(messages, tools=[])
+        summary = result["response"].choices[0].message.content or ""
+        return {"output": summary, "image_path": None}
+    except Exception as exc:
+        return {"output": f"Summarization error: {exc}", "image_path": None}
+
+
+# ── tool: encode / decode ─────────────────────────────────────────────────────
+
+async def encode_decode(text: str, operation: str) -> dict:
+    """Encode or decode text. Operations: base64_encode, base64_decode, url_encode, url_decode, hex_encode, hex_decode."""
+    try:
+        ops = {
+            "base64_encode": lambda t: base64.b64encode(t.encode()).decode(),
+            "base64_decode": lambda t: base64.b64decode(t.encode()).decode(errors="replace"),
+            "url_encode":    lambda t: urllib.parse.quote(t),
+            "url_decode":    lambda t: urllib.parse.unquote(t),
+            "hex_encode":    lambda t: t.encode().hex(),
+            "hex_decode":    lambda t: bytes.fromhex(t).decode(errors="replace"),
+        }
+        fn = ops.get(operation)
+        if not fn:
+            return {"output": f"Unknown operation. Use: {', '.join(ops.keys())}", "image_path": None}
+        result = fn(text)
+        return {"output": f"**{operation}:**\n```\n{result[:3000]}\n```", "image_path": None}
+    except Exception as exc:
+        return {"output": f"Encode/decode error: {exc}", "image_path": None}
+
+
+# ── tool: hash text ───────────────────────────────────────────────────────────
+
+async def hash_text(text: str, algorithm: str = "sha256") -> dict:
+    """Hash text using md5, sha1, sha256, or sha512."""
+    import hashlib
+    try:
+        h = hashlib.new(algorithm, text.encode())
+        return {"output": f"**{algorithm.upper()}:**\n`{h.hexdigest()}`", "image_path": None}
+    except ValueError:
+        return {"output": f"Unknown algorithm '{algorithm}'. Use: md5, sha1, sha256, sha512", "image_path": None}
+
+
+# ── tool: word / char counter ─────────────────────────────────────────────────
+
+async def count_words(text: str) -> dict:
+    """Count words, characters, sentences, paragraphs in text."""
+    words = len(text.split())
+    chars = len(text)
+    chars_no_space = len(text.replace(" ", "").replace("\n", ""))
+    sentences = len([s for s in re.split(r'[.!?]+', text) if s.strip()])
+    paragraphs = len([p for p in text.split("\n\n") if p.strip()])
+    read_time = max(1, round(words / 200))
+    return {"output": (
+        f"**Text Statistics:**\n"
+        f"- Words: {words:,}\n"
+        f"- Characters: {chars:,} ({chars_no_space:,} without spaces)\n"
+        f"- Sentences: {sentences:,}\n"
+        f"- Paragraphs: {paragraphs:,}\n"
+        f"- Est. read time: {read_time} min"
+    ), "image_path": None}
+
+
 # ── tool registry ─────────────────────────────────────────────────────────────
 
 TOOL_SCHEMAS = [
@@ -2254,6 +2609,41 @@ TOOL_SCHEMAS = [
     {"type":"function","function":{"name":"check_price","description":"Visit a product page and extract the current price.","parameters":{"type":"object","properties":{"url":{"type":"string"},"css_selector":{"type":"string"}},"required":["url"]}}},
     {"type":"function","function":{"name":"check_site_changed","description":"Check if a website changed since last checked. Call once to set baseline, again later to detect changes.","parameters":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}}},
 
+    # ── HTTP Request ─────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"http_request","description":"Make any HTTP request (GET, POST, PUT, DELETE, PATCH). Use for REST APIs, web scraping, webhooks, or any HTTP endpoint.","parameters":{"type":"object","properties":{"method":{"type":"string","description":"HTTP method: GET, POST, PUT, DELETE, PATCH"},"url":{"type":"string","description":"Full URL including https://"},"headers":{"type":"object","description":"Optional request headers"},"body":{"type":"string","description":"Optional request body (JSON string or plain text)"},"params":{"type":"object","description":"Optional query parameters"}},"required":["method","url"]}}},
+    # ── Data Analysis ─────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"analyze_data","description":"Load a CSV or JSON file from the workspace and return row count, column stats, and a preview.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Workspace file path (e.g. data.csv)"},"query":{"type":"string","description":"Optional question about the data"}},"required":["path"]}}},
+    # ── Diff ─────────────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"diff_files","description":"Compare two workspace files and return a unified diff showing what changed.","parameters":{"type":"object","properties":{"path_a":{"type":"string","description":"First file path"},"path_b":{"type":"string","description":"Second file path"}},"required":["path_a","path_b"]}}},
+    # ── Zip ──────────────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"zip_files","description":"Create a zip archive of workspace files.","parameters":{"type":"object","properties":{"output_name":{"type":"string","description":"Output zip filename (e.g. archive.zip)"},"files":{"type":"array","items":{"type":"string"},"description":"List of workspace file paths to include"}},"required":["output_name","files"]}}},
+    {"type":"function","function":{"name":"unzip_file","description":"Extract a zip archive into the workspace.","parameters":{"type":"object","properties":{"zip_path":{"type":"string","description":"Path to the zip file"},"output_dir":{"type":"string","description":"Destination folder (optional, defaults to workspace root)"}},"required":["zip_path"]}}},
+    # ── Regex ────────────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"regex_extract","description":"Extract all regex matches from text.","parameters":{"type":"object","properties":{"text":{"type":"string"},"pattern":{"type":"string","description":"Regex pattern"},"flags":{"type":"string","description":"Flags: i=case insensitive, m=multiline"}},"required":["text","pattern"]}}},
+    {"type":"function","function":{"name":"regex_replace","description":"Replace regex matches in text and return the result.","parameters":{"type":"object","properties":{"text":{"type":"string"},"pattern":{"type":"string"},"replacement":{"type":"string"},"flags":{"type":"string"}},"required":["text","pattern","replacement"]}}},
+    # ── Full Page Reader ──────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"browser_read_full_page","description":"Scroll through the entire browser page collecting all text content. Better than browser_read_page for long pages.","parameters":{"type":"object","properties":{"max_scrolls":{"type":"integer","description":"How many times to scroll down (default 10)"}},"required":[]}}},
+    # ── Translate ─────────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"translate_text","description":"Translate text to any language. target_language examples: es, fr, de, zh, ar, ja, pt, ru.","parameters":{"type":"object","properties":{"text":{"type":"string"},"target_language":{"type":"string","description":"Language code (e.g. es, fr, de, zh, ja)"},"source_language":{"type":"string","description":"Source language code or 'auto' (default)"}},"required":["text","target_language"]}}},
+    # ── QR Code ───────────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"generate_qr","description":"Generate a QR code image for any text, URL, or data.","parameters":{"type":"object","properties":{"content":{"type":"string","description":"Text or URL to encode"},"filename":{"type":"string","description":"Output filename (default: qrcode.png)"}},"required":["content"]}}},
+    # ── URL Shortener ─────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"shorten_url","description":"Shorten a long URL using TinyURL (free, no signup).","parameters":{"type":"object","properties":{"url":{"type":"string","description":"URL to shorten"}},"required":["url"]}}},
+    # ── JSON Formatter ────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"format_json","description":"Parse, validate, and pretty-print JSON. Also shows structure summary.","parameters":{"type":"object","properties":{"text":{"type":"string","description":"JSON string to format"}},"required":["text"]}}},
+    # ── Markdown to HTML ──────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"markdown_to_html","description":"Convert Markdown to a styled HTML page and preview it in the browser.","parameters":{"type":"object","properties":{"markdown":{"type":"string","description":"Markdown content"},"title":{"type":"string","description":"Document title"}},"required":["markdown"]}}},
+    # ── Reminder ─────────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"set_reminder","description":"Set a reminder that fires after N seconds with a desktop notification.","parameters":{"type":"object","properties":{"message":{"type":"string","description":"Reminder message"},"seconds":{"type":"integer","description":"Seconds until the reminder fires"}},"required":["message","seconds"]}}},
+    # ── Summarizer ───────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"summarize_text","description":"Summarize long text using AI. style: bullets | paragraph | tldr","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text to summarize"},"style":{"type":"string","description":"bullets, paragraph, or tldr (default: bullets)"}},"required":["text"]}}},
+    # ── Encode / Decode ───────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"encode_decode","description":"Encode or decode text. Operations: base64_encode, base64_decode, url_encode, url_decode, hex_encode, hex_decode.","parameters":{"type":"object","properties":{"text":{"type":"string"},"operation":{"type":"string","description":"base64_encode | base64_decode | url_encode | url_decode | hex_encode | hex_decode"}},"required":["text","operation"]}}},
+    # ── Hash ──────────────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"hash_text","description":"Hash text using md5, sha1, sha256, or sha512.","parameters":{"type":"object","properties":{"text":{"type":"string"},"algorithm":{"type":"string","description":"md5 | sha1 | sha256 | sha512 (default: sha256)"}},"required":["text"]}}},
+    # ── Word Counter ──────────────────────────────────────────────────────────────
+    {"type":"function","function":{"name":"count_words","description":"Count words, characters, sentences, paragraphs, and estimated read time for any text.","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}},
+
     # ── Secrets vault ─────────────────────────────────────────────────────────
     {
         "type": "function",
@@ -2498,6 +2888,25 @@ TOOL_MAP = {
     "aggregate_news":  aggregate_news,
     "check_price":     check_price,
     "check_site_changed": check_site_changed,
+    # New utility tools
+    "http_request":    http_request,
+    "analyze_data":    analyze_data,
+    "diff_files":      diff_files,
+    "zip_files":       zip_files,
+    "unzip_file":      unzip_file,
+    "regex_extract":   regex_extract,
+    "regex_replace":   regex_replace,
+    "browser_read_full_page": browser_read_full_page,
+    "translate_text":  translate_text,
+    "generate_qr":     generate_qr,
+    "shorten_url":     shorten_url,
+    "format_json":     format_json,
+    "markdown_to_html": markdown_to_html,
+    "set_reminder":    set_reminder,
+    "summarize_text":  summarize_text,
+    "encode_decode":   encode_decode,
+    "hash_text":       hash_text,
+    "count_words":     count_words,
     # Browser control
     "browser_navigate":   browser_navigate,
     "browser_screenshot": browser_screenshot,

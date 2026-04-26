@@ -18,7 +18,8 @@ RUN pip install --no-cache-dir \
     pdfplumber reportlab python-multipart ddgs \
     yt-dlp youtube-transcript-api openai \
     faster-whisper playwright \
-    "python-jose[cryptography]" "passlib[bcrypt]" "bcrypt<4.0.0"
+    "python-jose[cryptography]" "passlib[bcrypt]" "bcrypt<4.0.0" \
+    "qrcode[pil]" markdown cryptography
 RUN pip install --no-cache-dir apscheduler sqlalchemy
 RUN playwright install chromium --with-deps
 
