@@ -14,6 +14,7 @@ from typing import Callable, Awaitable
 import db
 import llm_router
 import settings_store
+import skill_router
 from tools import TOOL_SCHEMAS, execute_tool
 
 # Token counting (tiktoken) — soft import so server still runs without it
@@ -308,6 +309,9 @@ async def run_agent(
     persona = next((p for p in personas if p["id"] == persona_id), None)
     if persona and persona.get("system_prompt"):
         sys_content = persona["system_prompt"] + "\n\n" + sys_content
+
+    # Inject skill playbook if user's message matches a known skill trigger
+    sys_content = skill_router.inject_skill_context(sys_content, user_text)
 
     # For multimodal, pass the raw content (list) as the last user message
     if not isinstance(user_message, str):

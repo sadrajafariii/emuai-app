@@ -713,6 +713,14 @@ async def delete_prompt_ep(prompt_id: str, request: Request):
     return {"ok": True}
 
 
+# ── Skill router ─────────────────────────────────────────────────────────────
+
+@app.get("/api/skills")
+async def list_skills():
+    import skill_router
+    return JSONResponse({"skills": skill_router.list_skills()})
+
+
 # ── Cost tracker ──────────────────────────────────────────────────────────────
 
 @app.get("/api/cost")
