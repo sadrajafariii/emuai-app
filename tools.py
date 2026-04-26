@@ -1461,7 +1461,12 @@ async def make_plan(goal: str) -> dict:
     try:
         import llm_router
         messages = [
-            {"role": "system", "content": "You are a planning assistant. Break the user's goal into clear, numbered, executable steps. Be specific about tools and actions. Output ONLY the numbered list, nothing else."},
+            {"role": "system", "content": (
+                "You are a planning assistant for an AI agent that executes tasks immediately using tools. "
+                "Break the goal into 3-6 short, concrete, executable steps the agent will do right now. "
+                "For web apps/games/dashboards: always plan to build a single self-contained HTML file using serve_html_app — never plan a multi-file stack. "
+                "Output ONLY the numbered list, nothing else. No explanations, no sub-bullets."
+            )},
             {"role": "user", "content": f"Goal: {goal}"},
         ]
         result = await llm_router.chat_completion(messages, tools=[])

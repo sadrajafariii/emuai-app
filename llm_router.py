@@ -38,7 +38,8 @@ MODELS = [
     "meta-llama/llama-3.2-3b-instruct:free",        # Llama 3.2 3B (last resort)
 ]
 
-COOLDOWN_SECONDS = 60
+COOLDOWN_SECONDS = 30        # 429 cooldown (was 60s — free tier resets faster)
+_MAX_WAIT_SECONDS = 45       # max time to wait for any model to come back
 _cooldowns: dict[str, float] = {}
 
 # Models that don't support native function calling
@@ -356,5 +357,71 @@ async def chat_completion(
             else:
                 logger.warning("✗ %s failed: %s", model, exc)
             last_error = exc
+
+    # All models on cooldown — wait for the soonest one to become available then retry once
+    if _cooldowns:
+        soonest = min(_cooldowns.values())
+        wait = soonest - time.time()
+        if 0 < wait <= _MAX_WAIT_SECONDS:
+            logger.warning("⏳ All models cooling down — waiting %.0fs for next available", wait)
+            await asyncio.sleep(wait + 0.5)
+            # Retry the loop once more
+            for model in model_list:
+                if not _is_available(model):
+                    continue
+                use_prompt_tools = model in _NO_FUNCTION_CALLING
+                is_reasoning     = model in _REASONING_MODELS
+                try:
+                    kwargs: dict = {"model": model, "messages": messages, "timeout": 90}
+                    if tools:
+                        if use_prompt_tools:
+                            kwargs["messages"] = _inject_tool_prompt(messages, tools)
+                        else:
+                            kwargs["tools"] = tools
+                            kwargs["tool_choice"] = "auto"
+                    if is_reasoning:
+                        kwargs["max_tokens"] = 8000
+                    if stream:
+                        kwargs["stream"] = True
+                    logger.info("🔄 Retry %s after cooldown wait", model)
+                    response = await or_client.chat.completions.create(**kwargs)
+                    thinking = ""
+                    if not stream:
+                        choice = response.choices[0]
+                        content = choice.message.content or ""
+                        has_tool_calls = bool(getattr(choice.message, "tool_calls", None))
+                        thinking, clean_content = extract_thinking(content)
+                        if clean_content != content:
+                            choice.message.content = clean_content
+                        if use_prompt_tools and tools and not has_tool_calls:
+                            ptc = _parse_prompt_tool_call(content)
+                            if ptc is not None:
+                                usage = getattr(response, "usage", None)
+                                return {"model": model, "response": response,
+                                        "used_prompt_tools": True, "prompt_tool_call": ptc,
+                                        "thinking": thinking,
+                                        "token_usage": {
+                                            "prompt": getattr(usage, "prompt_tokens", 0) if usage else 0,
+                                            "completion": getattr(usage, "completion_tokens", 0) if usage else 0,
+                                            "total": getattr(usage, "total_tokens", 0) if usage else 0,
+                                        }}
+                        if not content and not has_tool_calls:
+                            continue
+                    usage = getattr(response, "usage", None)
+                    return {"model": model, "response": response,
+                            "used_prompt_tools": use_prompt_tools,
+                            "thinking": thinking if not stream else "",
+                            "token_usage": {
+                                "prompt": getattr(usage, "prompt_tokens", 0) if usage else 0,
+                                "completion": getattr(usage, "completion_tokens", 0) if usage else 0,
+                                "total": getattr(usage, "total_tokens", 0) if usage else 0,
+                            }}
+                except Exception as exc:
+                    msg = str(exc)
+                    if "429" in msg or "rate limit" in msg.lower():
+                        _cooldown(model)
+                    elif "502" in msg or "503" in msg or "provider" in msg.lower():
+                        _cooldown(model, seconds=30)
+                    last_error = exc
 
     raise RuntimeError(f"All models exhausted. Last error: {last_error}")

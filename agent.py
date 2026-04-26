@@ -162,7 +162,8 @@ Use this to store X/Twitter passwords, API keys, etc. so you can reuse them acro
 - browser_vision(question) — take a screenshot and ask a vision model what it sees. Use when you need to understand something visual that text alone can't describe.
 
 ## Planning
-- make_plan(goal) — break a complex goal into numbered steps BEFORE starting. Call this first for any multi-step task.
+- make_plan(goal) — break a goal into 3-6 concrete steps you will execute immediately. Keep it SHORT and actionable.
+  For apps/games/dashboards: ALWAYS build as a single self-contained HTML file and use serve_html_app — do NOT plan a multi-file React/Node/database stack.
 
 ## Deep Research
 - deep_research(topic, max_sources) — search multiple queries, read sources, synthesize into a comprehensive report.
@@ -328,8 +329,13 @@ async def run_agent(
         try:
             result = await llm_router.chat_completion(messages, tools=TOOL_SCHEMAS, user_cfg=cfg if user_id else None)
         except RuntimeError as exc:
-            await emit({"type": "error", "content": str(exc)})
-            asyncio.create_task(db.update_task(task_id, "failed", error=str(exc)[:300], tool_calls_count=tool_calls_count))
+            err = str(exc)
+            # Show a friendlier message and wait hint before giving up
+            if "exhausted" in err.lower():
+                await emit({"type": "warning", "content": "⏳ All free models are rate-limited right now. Wait 30-60s and try again, or send any message to retry."})
+            else:
+                await emit({"type": "error", "content": err})
+            asyncio.create_task(db.update_task(task_id, "failed", error=err[:300], tool_calls_count=tool_calls_count))
             return
 
         model_used  = result["model"]
