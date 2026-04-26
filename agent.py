@@ -295,6 +295,15 @@ async def run_agent(
     if not isinstance(user_message, str):
         history[-1]["content"] = user_message  # replace last user msg with multimodal content
 
+    # Trim old tool results in history to keep context lean
+    # (only the last 2 tool results get full content; older ones are capped at 400 chars)
+    tool_msg_indices = [i for i, m in enumerate(history) if m.get("role") == "tool"]
+    for idx in tool_msg_indices[:-2]:
+        m = history[idx]
+        c = m.get("content") or ""
+        if len(c) > 400:
+            history[idx] = {**m, "content": c[:400] + "…[trimmed]"}
+
     messages = [{"role": "system", "content": sys_content}] + history
 
     # Cumulative token counts for this agent run
@@ -411,62 +420,103 @@ async def run_agent(
             messages.append({"role": "assistant", "content": content or None, "tool_calls": tc_payload})
             await db.save_message(session_id, "assistant", content=content or None, tool_calls=tc_payload)
 
-        # ── execute each tool call ────────────────────────────────────────────
-        for tc in tool_calls:
+        # ── execute tool calls (parallel where safe) ──────────────────────────
+        # Tools that share state must run sequentially
+        _SEQUENTIAL_TOOLS = {
+            "browser_navigate", "browser_click", "browser_type", "browser_press",
+            "browser_scroll", "browser_read_page", "browser_wait", "browser_close",
+            "browser_new_tab", "browser_switch_tab", "browser_close_tab",
+            "browser_read_full_page", "browser_vision",
+            "desktop_screenshot", "desktop_click", "desktop_type",
+            "desktop_hotkey", "desktop_scroll_screen",
+            "workflow_run",
+        }
+
+        # Separate into sequential (need order/shared state) and parallel (independent)
+        needs_permission = [tc for tc in tool_calls if tc["name"] in PERMISSION_REQUIRED]
+        sequential = [tc for tc in tool_calls if tc["name"] in _SEQUENTIAL_TOOLS]
+        can_parallel = [tc for tc in tool_calls
+                        if tc["name"] not in PERMISSION_REQUIRED
+                        and tc["name"] not in _SEQUENTIAL_TOOLS]
+
+        # Execute in order: permission-gated → parallel batch → sequential
+        ordered = needs_permission + (
+            [("parallel", can_parallel)] if can_parallel else []
+        ) + sequential
+
+        # Helper: run one tool and return result dict
+        async def _run_one(tc: dict) -> dict:
+            tool_name = tc["name"]
+            tool_args = tc["arguments"]
+            tool_id   = tc["id"]
+            await emit({"type": "tool_start", "tool": tool_name, "args": tool_args})
+            asyncio.create_task(db.track_event("tool", tool_name=tool_name, session_id=session_id))
+            result = await execute_tool(tool_name, tool_args, send=emit)
+            return {"tc": tc, "result": result}
+
+        # Flatten ordered list back into individual calls with parallel group handling
+        results_ordered = []  # list of (tc, result)
+
+        for item in ordered:
+            if item == ("parallel", can_parallel):
+                # Run all parallel-safe tools concurrently
+                if len(can_parallel) == 1:
+                    r = await _run_one(can_parallel[0])
+                    results_ordered.append((r["tc"], r["result"]))
+                else:
+                    batch = await asyncio.gather(*[_run_one(tc) for tc in can_parallel])
+                    results_ordered.extend((r["tc"], r["result"]) for r in batch)
+            else:
+                tc = item
+                tool_name = tc["name"]
+                tool_args = tc["arguments"]
+                tool_id   = tc["id"]
+
+                # Permission gate
+                if tool_name in PERMISSION_REQUIRED:
+                    session_perms = _session_permissions.setdefault(session_id, set())
+                    if tool_name not in session_perms:
+                        granted = await _request_permission(session_id, tool_name, tool_args, emit)
+                        if not granted:
+                            result_text = f"User denied permission for {tool_name}."
+                            await emit({"type": "tool_result", "tool": tool_name,
+                                        "output": result_text, "image_path": None, "status": "denied"})
+                            messages.append({"role": "tool", "tool_call_id": tool_id,
+                                             "name": tool_name, "content": result_text})
+                            continue
+                        session_perms.add(tool_name)
+
+                r = await _run_one(tc)
+                results_ordered.append((r["tc"], r["result"]))
+
+        # ── process results + add to history ─────────────────────────────────
+        for tc, tool_result in results_ordered:
             tool_name = tc["name"]
             tool_args = tc["arguments"]
             tool_id   = tc["id"]
 
-            # ── permission gate ───────────────────────────────────────────────
-            if tool_name in PERMISSION_REQUIRED:
-                session_perms = _session_permissions.setdefault(session_id, set())
-                if tool_name not in session_perms:
-                    granted = await _request_permission(session_id, tool_name, tool_args, emit)
-                    if not granted:
-                        result_text = f"User denied permission for {tool_name}."
-                        await emit({"type": "tool_result", "tool": tool_name,
-                                    "output": result_text, "image_path": None, "status": "denied"})
-                        messages.append({"role": "tool", "tool_call_id": tool_id,
-                                         "name": tool_name, "content": result_text})
-                        continue
-                    session_perms.add(tool_name)
-
-            # ── track tool call in analytics ──────────────────────────────────
-            asyncio.create_task(db.track_event("tool", tool_name=tool_name, session_id=session_id))
-            tool_calls_count += 1
-
-            # ── notify UI: starting ───────────────────────────────────────────
-            await emit({"type": "tool_start", "tool": tool_name, "args": tool_args})
-
-            # ── execute ───────────────────────────────────────────────────────
-            tool_result = await execute_tool(tool_name, tool_args, send=emit)
             output_text = tool_result["output"]
             image_path  = tool_result.get("image_path")
             app_url     = tool_result.get("app_url")
             status      = _infer_status(tool_name, output_text)
+            tool_calls_count += 1
 
-            # ── audit log ─────────────────────────────────────────────────────
-            args_summary = json.dumps(tool_args)[:300]
             asyncio.create_task(db.log_audit(
                 user_id or "anon", session_id, tool_name,
-                args_summary, output_text[:500], status,
+                json.dumps(tool_args)[:300], output_text[:500], status,
             ))
 
-            # ── self-healing: inject error hint so agent retries smarter ──────
+            # Self-healing
             if status == "fail":
                 consecutive_fails += 1
                 output_text = (
                     f"⚠ TOOL FAILED (attempt {consecutive_fails}):\n{output_text}\n\n"
-                    "Analyze this error carefully. Try a DIFFERENT approach — "
-                    "different command, fix syntax, install missing dependency, "
-                    "check if path/file exists first, use alternative method. "
-                    "Do NOT give up. Do NOT repeat the exact same call."
+                    "Try a DIFFERENT approach — fix syntax, check path exists, "
+                    "install missing dependency, or use an alternative method."
                 )
                 if consecutive_fails >= 3:
-                    await emit({
-                        "type": "warning",
-                        "content": f"Agent has failed {consecutive_fails} times in a row. Consider providing more context.",
-                    })
+                    await emit({"type": "warning",
+                                "content": f"Agent has failed {consecutive_fails} times in a row."})
             else:
                 consecutive_fails = 0
 
@@ -476,14 +526,16 @@ async def run_agent(
                 "app_url": app_url, "status": status,
             })
 
-            # ── add result to history ─────────────────────────────────────────
+            # Cap tool output in LLM context (full output shown in UI, trimmed for LLM)
+            ctx_text = output_text[:3000] + ("…[truncated]" if len(output_text) > 3000 else "")
+
             if used_prompt_tools:
-                note = f"[Tool result for {tool_name}]\n{output_text}"
+                note = f"[Tool result for {tool_name}]\n{ctx_text}"
                 messages.append({"role": "user", "content": note})
                 await db.save_message(session_id, "user", note)
             else:
                 messages.append({"role": "tool", "tool_call_id": tool_id,
-                                  "name": tool_name, "content": output_text})
+                                  "name": tool_name, "content": ctx_text})
                 await db.save_message(session_id, "tool", content=output_text,
                                       tool_call_id=tool_id, name=tool_name)
     else:

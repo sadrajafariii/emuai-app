@@ -30,6 +30,22 @@ SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 BROWSE_TIMEOUT = int(os.getenv("BROWSE_TIMEOUT", "60"))
 CODE_TIMEOUT = int(os.getenv("CODE_TIMEOUT", "30"))
 
+# ── In-process search cache (TTL 5 min, max 200 entries) ─────────────────────
+_search_cache: dict[str, tuple[float, list]] = {}  # query -> (timestamp, results)
+_CACHE_TTL = 300  # seconds
+
+def _cache_get(key: str):
+    entry = _search_cache.get(key)
+    if entry and (time.time() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+def _cache_set(key: str, value):
+    if len(_search_cache) > 200:          # evict oldest
+        oldest = min(_search_cache, key=lambda k: _search_cache[k][0])
+        del _search_cache[oldest]
+    _search_cache[key] = (time.time(), value)
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -71,15 +87,20 @@ async def web_search(query: str, _send=None) -> dict:
         except Exception as exc:
             logger.debug("Browser search display failed (non-fatal): %s", exc)
 
-    # DDG API search for reliable text results
+    # DDG API search for reliable text results (cached)
     async def _api_search():
+        cached = _cache_get(f"search:{query}")
+        if cached is not None:
+            return cached
         try:
             from ddgs import DDGS
             loop = asyncio.get_event_loop()
             def _run():
                 with DDGS() as ddgs:
                     return list(ddgs.text(query, max_results=8))
-            return await loop.run_in_executor(None, _run)
+            results = await loop.run_in_executor(None, _run)
+            _cache_set(f"search:{query}", results)
+            return results
         except Exception as exc:
             logger.warning("DDG API error: %s", exc)
             return []
@@ -1470,11 +1491,16 @@ async def deep_research(topic: str, max_sources: int = 8, _send=None) -> dict:
         all_results = []
         loop = asyncio.get_event_loop()
         for q in queries:
+            cached = _cache_get(f"search:{q}")
+            if cached is not None:
+                all_results.extend(cached)
+                continue
             try:
                 def _search(q=q):
                     with DDGS() as d:
                         return list(d.text(q, max_results=4))
                 results = await loop.run_in_executor(None, _search)
+                _cache_set(f"search:{q}", results)
                 all_results.extend(results)
             except Exception:
                 pass
