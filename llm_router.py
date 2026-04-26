@@ -26,7 +26,7 @@ MODELS = [
     "z-ai/glm-4.5-air:free",                        # GLM 4.5 Air — MoE, thinking + tool use
     "deepseek/deepseek-r1:free",                    # Best reasoning, shows thinking
     "deepseek/deepseek-chat-v3-0324:free",          # Best coding/chat
-    "meta-llama/llama-4-maverick:free",             # Llama 4 Maverick
+    "google/gemini-2.0-flash-exp:free",              # Gemini 2.0 Flash (vision capable)
     "qwen/qwen3-235b-a22b:free",                    # Qwen 3 235B MoE
     "qwen/qwen3-30b-a3b:free",                      # Qwen 3 30B
     "qwen/qwen3-8b:free",                           # Qwen 3 8B fast
@@ -74,7 +74,7 @@ _TASK_PRIORITY: dict[str, list[str]] = {
     "code": [
         "deepseek/deepseek-chat-v3-0324:free",
         "deepseek/deepseek-r1:free",
-        "meta-llama/llama-4-maverick:free",
+        "google/gemini-2.0-flash-exp:free",
         "qwen/qwen3-235b-a22b:free",
         "z-ai/glm-4.5-air:free",
     ],

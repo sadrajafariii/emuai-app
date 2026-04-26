@@ -30,6 +30,32 @@ SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 BROWSE_TIMEOUT = int(os.getenv("BROWSE_TIMEOUT", "60"))
 CODE_TIMEOUT = int(os.getenv("CODE_TIMEOUT", "30"))
 
+# ── Vision model fallback chain ───────────────────────────────────────────────
+# Tried in order; first one that responds without 404 wins.
+_VISION_MODELS = [
+    "google/gemini-2.0-flash-exp:free",
+    "meta-llama/llama-3.2-11b-vision-instruct:free",
+    "qwen/qwen2.5-vl-7b-instruct:free",
+    "google/gemma-3-27b-it:free",
+]
+
+async def _vision_call(client, messages: list, timeout: int = 30) -> str:
+    """Try each vision model in order, return the first successful response text."""
+    from openai import AsyncOpenAI
+    last_err = "No vision models available"
+    for model in _VISION_MODELS:
+        try:
+            resp = await client.chat.completions.create(
+                model=model, messages=messages, timeout=timeout,
+            )
+            return resp.choices[0].message.content or ""
+        except Exception as e:
+            last_err = str(e)
+            if "404" not in last_err and "No endpoints" not in last_err:
+                raise  # real error, don't retry
+            continue  # model unavailable, try next
+    raise RuntimeError(last_err)
+
 # ── In-process search cache (TTL 5 min, max 200 entries) ─────────────────────
 _search_cache: dict[str, tuple[float, list]] = {}  # query -> (timestamp, results)
 _CACHE_TTL = 300  # seconds
@@ -979,23 +1005,19 @@ async def desktop_vision(question: str = "What is on screen?", _send=None) -> di
         api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
         client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
 
-        response = await client.chat.completions.create(
-            model="meta-llama/llama-4-maverick:free",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                    {"type": "text", "text": (
-                        f"{question}\n\n"
-                        f"Screen resolution: {w}×{h}px. "
-                        "If asked to find UI elements, describe their approximate x,y coordinates "
-                        "so desktop_click() can be called. Be precise about locations."
-                    )},
-                ]
-            }],
-            timeout=30,
-        )
-        answer = response.choices[0].message.content or "Could not analyze screen."
+        answer = await _vision_call(client, [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                {"type": "text", "text": (
+                    f"{question}\n\n"
+                    f"Screen resolution: {w}×{h}px. "
+                    "If asked to find UI elements, describe their approximate x,y coordinates "
+                    "so desktop_click() can be called. Be precise about locations."
+                )},
+            ]
+        }], timeout=30)
+        answer = answer or "Could not analyze screen."
         return {"output": f"**Vision ({w}×{h}):** {answer}", "image_path": img_path}
 
     except Exception as exc:
@@ -1098,35 +1120,29 @@ async def computer_use(task: str, max_steps: int = 10, _send=None) -> dict:
                              "action": f"Step {step+1}: analyzing screen", "image_path": img_path})
 
             # Ask vision model what action to take
-            response = await client.chat.completions.create(
-                model="meta-llama/llama-4-maverick:free",
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                        {"type": "text", "text": (
-                            f"Task: {task}\n"
-                            f"Step: {step+1} of max {max_steps}\n"
-                            f"Previous steps: {'; '.join(step_log) or 'none'}\n"
-                            f"Screen: {w}×{h}px\n\n"
-                            "Look at the screenshot and decide the NEXT single action to take.\n"
-                            "Reply with EXACTLY ONE of these formats:\n"
-                            "  CLICK x,y — click at coordinates\n"
-                            "  DOUBLE_CLICK x,y — double click\n"
-                            "  RIGHT_CLICK x,y — right click\n"
-                            "  TYPE text — type this text (use after clicking a text field)\n"
-                            "  HOTKEY keys — press shortcut (e.g. ctrl+c, win+r, alt+f4)\n"
-                            "  OPEN app_name — open an application\n"
-                            "  WAIT — wait 1 second (use if loading)\n"
-                            "  DONE: result — task is complete, describe result\n\n"
-                            "Be precise with coordinates. Describe what you see first, then the action."
-                        )},
-                    ]
-                }],
-                timeout=30,
-            )
-
-            decision = (response.choices[0].message.content or "").strip()
+            decision = (await _vision_call(client, [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    {"type": "text", "text": (
+                        f"Task: {task}\n"
+                        f"Step: {step+1} of max {max_steps}\n"
+                        f"Previous steps: {'; '.join(step_log) or 'none'}\n"
+                        f"Screen: {w}×{h}px\n\n"
+                        "Look at the screenshot and decide the NEXT single action to take.\n"
+                        "Reply with EXACTLY ONE of these formats:\n"
+                        "  CLICK x,y — click at coordinates\n"
+                        "  DOUBLE_CLICK x,y — double click\n"
+                        "  RIGHT_CLICK x,y — right click\n"
+                        "  TYPE text — type this text (use after clicking a text field)\n"
+                        "  HOTKEY keys — press shortcut (e.g. ctrl+c, win+r, alt+f4)\n"
+                        "  OPEN app_name — open an application\n"
+                        "  WAIT — wait 1 second (use if loading)\n"
+                        "  DONE: result — task is complete, describe result\n\n"
+                        "Be precise with coordinates. Describe what you see first, then the action."
+                    )},
+                ]
+            }], timeout=30)).strip()
             step_log.append(f"Step {step+1}: {decision[:80]}")
 
             # Parse and execute
@@ -1883,18 +1899,13 @@ async def browser_vision(question: str = "What is on this page? Describe all vis
         api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
         client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
 
-        response = await client.chat.completions.create(
-            model="meta-llama/llama-4-maverick:free",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                    {"type": "text", "text": question},
-                ]
-            }],
-            timeout=30,
-        )
-        description = response.choices[0].message.content or "Could not analyze image."
+        description = await _vision_call(client, [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                {"type": "text", "text": question},
+            ]
+        }], timeout=30) or "Could not analyze image."
         name = f"{uuid.uuid4().hex}.png"
         dest = SCREENSHOTS_DIR / name
         dest.write_bytes(png)
@@ -2299,7 +2310,7 @@ async def deep_research(topic: str, max_sources: int = 8, _send=None) -> dict:
         api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
         client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
         response = await client.chat.completions.create(
-            model="meta-llama/llama-4-maverick:free",
+            model="deepseek/deepseek-chat-v3-0324:free",
             messages=[
                 {"role": "system", "content": (
                     "You are a research analyst. Synthesize the sources into a comprehensive "
