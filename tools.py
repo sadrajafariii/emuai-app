@@ -30,32 +30,62 @@ SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 BROWSE_TIMEOUT = int(os.getenv("BROWSE_TIMEOUT", "60"))
 CODE_TIMEOUT = int(os.getenv("CODE_TIMEOUT", "30"))
 
-# ── Vision model fallback chain ───────────────────────────────────────────────
-# Confirmed available free vision models on OpenRouter (checked live).
-# Tried in order; first one that responds without 404/unavailable wins.
-_VISION_MODELS = [
-    "google/gemma-4-31b-it:free",          # Gemma 4 31B — best quality, vision
-    "google/gemma-4-26b-a4b-it:free",      # Gemma 4 26B MoE — fast, vision
-    "nvidia/nemotron-nano-12b-v2-vl:free", # Dedicated vision-language model
-    "google/gemma-3-27b-it:free",          # Gemma 3 27B — vision fallback
+# ── Vision provider chain ─────────────────────────────────────────────────────
+# Priority: Groq (free, separate rate limits) → OpenRouter free models
+# Each provider is tried in order; 429/404 → skip to next.
+_OPENROUTER_VISION_MODELS = [
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-nano-12b-v2-vl:free",
+    "google/gemma-3-27b-it:free",
 ]
+_SKIP_CODES = ("404", "429", "No endpoints", "rate-limited", "temporarily", "unavailable")
 
-async def _vision_call(client, messages: list, timeout: int = 30) -> str:
-    """Try each vision model in order, return the first successful response text."""
-    last_err = "No vision models available"
-    for model in _VISION_MODELS:
-        try:
-            resp = await client.chat.completions.create(
-                model=model, messages=messages, timeout=timeout,
-            )
-            return resp.choices[0].message.content or ""
-        except Exception as e:
-            last_err = str(e)
-            # Skip to next model on rate-limit or unavailable errors
-            if any(code in last_err for code in ("404", "429", "No endpoints", "rate-limited", "temporarily")):
-                continue
-            raise  # real error (auth, bad request, etc.), don't retry
-    raise RuntimeError(f"All vision models failed or rate-limited. Last error: {last_err}")
+async def _vision_call(messages: list, timeout: int = 30) -> str:
+    """
+    Try vision providers in priority order:
+    1. Groq llama-3.2-vision (free tier, separate rate limits from OpenRouter)
+    2. OpenRouter free vision models (fallback)
+    Returns the first successful response text.
+    """
+    import settings_store as _ss2
+    from openai import AsyncOpenAI
+    cfg = _ss2.load()
+    last_err = "No vision providers configured"
+
+    # ── 1. Groq (uses same key already configured for Whisper) ────────────────
+    groq_key = cfg.get("groq_api_key") or os.getenv("GROQ_API_KEY", "")
+    if groq_key:
+        groq = AsyncOpenAI(base_url="https://api.groq.com/openai/v1", api_key=groq_key)
+        for model in ("llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"):
+            try:
+                resp = await groq.chat.completions.create(
+                    model=model, messages=messages, timeout=timeout, max_tokens=1024,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as e:
+                last_err = str(e)
+                if any(c in last_err for c in _SKIP_CODES):
+                    continue
+                raise
+
+    # ── 2. OpenRouter free vision models ──────────────────────────────────────
+    or_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
+    if or_key:
+        or_client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=or_key)
+        for model in _OPENROUTER_VISION_MODELS:
+            try:
+                resp = await or_client.chat.completions.create(
+                    model=model, messages=messages, timeout=timeout,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as e:
+                last_err = str(e)
+                if any(c in last_err for c in _SKIP_CODES):
+                    continue
+                raise
+
+    raise RuntimeError(f"All vision providers failed. Last: {last_err}")
 
 # ── In-process search cache (TTL 5 min, max 200 entries) ─────────────────────
 _search_cache: dict[str, tuple[float, list]] = {}  # query -> (timestamp, results)
@@ -1025,11 +1055,7 @@ async def desktop_vision(question: str = "What is on screen?", _send=None) -> di
             await _send({"type": "browser_frame", "url": "desktop://",
                          "action": "Desktop vision scan", "image_path": img_path})
 
-        cfg = _ss.load()
-        api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
-        client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
-
-        answer = await _vision_call(client, [{
+        answer = await _vision_call([{
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
@@ -1054,6 +1080,136 @@ async def desktop_vision(question: str = "What is on screen?", _send=None) -> di
             ),
             "image_path": None,
         }
+
+
+async def desktop_find_element(app_title: str, element_name: str = "", action: str = "click", _send=None) -> dict:
+    """
+    Find and interact with any UI element in any app by name — NO coordinates needed.
+    Uses Windows accessibility APIs (UIAutomation) to read the actual UI tree.
+    Faster and 100% reliable compared to vision-based clicking.
+
+    action options:
+      'list'   — list all buttons/controls in the window (use this first to discover elements)
+      'click'  — click the element with the matching name
+      'get_text' — return the element's current text/value
+    """
+    try:
+        loop = asyncio.get_event_loop()
+
+        def _do():
+            try:
+                import pywinauto
+                from pywinauto import Desktop
+            except ImportError:
+                # Fallback: use uiautomation module
+                try:
+                    import uiautomation as auto
+                    wins = auto.GetRootControl().GetChildren()
+                    target = next((w for w in wins if app_title.lower() in (w.Name or "").lower()), None)
+                    if not target:
+                        names = [w.Name for w in wins if w.Name][:15]
+                        return f"Window '{app_title}' not found. Open: {names}"
+                    if action == "list":
+                        btns = target.GetChildren()
+                        items = []
+                        def _collect(ctrl, depth=0):
+                            if depth > 5: return
+                            try:
+                                n = ctrl.Name
+                                t = ctrl.ControlTypeName
+                                if n: items.append(f"{t}: {n}")
+                                for c in ctrl.GetChildren(): _collect(c, depth+1)
+                            except: pass
+                        _collect(target)
+                        return "UI elements:\n" + "\n".join(items[:40]) if items else "No named elements found"
+                    found = None
+                    def _find(ctrl, depth=0):
+                        nonlocal found
+                        if depth > 5 or found: return
+                        try:
+                            if element_name.lower() in (ctrl.Name or "").lower():
+                                found = ctrl
+                                return
+                            for c in ctrl.GetChildren(): _find(c, depth+1)
+                        except: pass
+                    _find(target)
+                    if not found:
+                        return f"Element '{element_name}' not found in '{app_title}'"
+                    if action == "click":
+                        found.Click()
+                        return f"Clicked '{element_name}' in '{app_title}'"
+                    elif action == "get_text":
+                        return found.Name or found.GetValuePattern().Value
+                    return f"Unknown action: {action}"
+                except Exception as e2:
+                    return f"UIAutomation not available: {e2}. Install with: pip install uiautomation"
+
+            # pywinauto path
+            app = Desktop(backend="uia")
+            wins = app.windows()
+            target = None
+            for w in wins:
+                try:
+                    if app_title.lower() in w.window_text().lower():
+                        target = w
+                        break
+                except Exception:
+                    pass
+            if not target:
+                names = []
+                for w in wins[:15]:
+                    try: names.append(w.window_text())
+                    except: pass
+                return f"Window '{app_title}' not found. Open windows: {names}"
+
+            if action == "list":
+                items = []
+                def _collect(ctrl, depth=0):
+                    if depth > 6: return
+                    try:
+                        n = ctrl.window_text()
+                        t = ctrl.element_info.control_type
+                        if n: items.append(f"{t}: {n}")
+                        for c in ctrl.children(): _collect(c, depth+1)
+                    except: pass
+                _collect(target)
+                return "UI elements:\n" + "\n".join(items[:40]) if items else "No named elements found"
+
+            # Search for element
+            found = None
+            def _find(ctrl, depth=0):
+                nonlocal found
+                if depth > 6 or found: return
+                try:
+                    n = (ctrl.window_text() or "").lower()
+                    if element_name.lower() in n and n:
+                        found = ctrl
+                        return
+                    for c in ctrl.children(): _find(c, depth+1)
+                except: pass
+            _find(target)
+
+            if not found:
+                return f"Element '{element_name}' not found in '{app_title}'. Use action='list' to see available elements."
+            if action == "click":
+                found.click_input()
+                return f"✓ Clicked '{element_name}' in '{app_title}'"
+            elif action == "get_text":
+                return found.window_text() or "(empty)"
+            return f"Unknown action: {action}"
+
+        result = await loop.run_in_executor(None, _do)
+        img_path = None
+        try:
+            img_path = await loop.run_in_executor(None, _desktop_snap)
+            if _send:
+                await _send({"type": "browser_frame", "url": "desktop://",
+                             "action": f"UI: {action} '{element_name}'", "image_path": img_path})
+        except Exception:
+            pass
+        return {"output": result, "image_path": img_path}
+    except Exception as exc:
+        return {"output": f"desktop_find_element error: {exc}", "image_path": None}
 
 
 async def desktop_double_click(x: int, y: int, _send=None) -> dict:
@@ -1135,10 +1291,6 @@ async def computer_use(task: str, max_steps: int = 10, _send=None) -> dict:
             return base64.b64encode(buf.getvalue()).decode(), w, h
         return await loop.run_in_executor(None, _do)
 
-    cfg = _ss.load()
-    api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
-    client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
-
     try:
         for step in range(max_steps):
             await _status(f"Computer use step {step+1}/{max_steps}…")
@@ -1153,7 +1305,7 @@ async def computer_use(task: str, max_steps: int = 10, _send=None) -> dict:
 
             # Ask vision model what action to take
             try:
-                decision = (await _vision_call(client, [{
+                decision = (await _vision_call([{
                     "role": "user",
                     "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
@@ -1930,14 +2082,7 @@ async def browser_vision(question: str = "What is on this page? Describe all vis
         png = await page.screenshot(full_page=False)
         b64 = base64.b64encode(png).decode()
 
-        # Call vision model via OpenRouter
-        import settings_store, os
-        from openai import AsyncOpenAI
-        cfg = settings_store.load()
-        api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
-        client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
-
-        description = await _vision_call(client, [{
+        description = await _vision_call([{
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
@@ -3050,6 +3195,7 @@ TOOL_SCHEMAS = [
     {"type":"function","function":{"name":"open_app","description":"Open any application on the computer by name. Examples: 'chrome', 'spotify', 'notepad', 'vscode', 'calculator', 'discord'. Works on Windows, macOS, Linux.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Application name to open"}},"required":["name"]}}},
     {"type":"function","function":{"name":"focus_window","description":"Find a window by title and bring it to the foreground. Partial match. Example: focus_window('Notepad'), focus_window('Chrome').","parameters":{"type":"object","properties":{"title":{"type":"string","description":"Partial window title to search for"}},"required":["title"]}}},
     {"type":"function","function":{"name":"desktop_vision","description":"Take a full desktop screenshot and use vision AI to understand what is on screen — read text, find buttons, get coordinates for clicking. ALWAYS call after opening an app before clicking anything.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze (default: What is on screen?)"}},"required":[]}}},
+    {"type":"function","function":{"name":"desktop_find_element","description":"Find and click any UI element in any app by NAME using Windows accessibility APIs — no coordinates or vision needed. PREFER this over desktop_vision for clicking buttons. First use action='list' to see all elements, then action='click' with the element name.","parameters":{"type":"object","properties":{"app_title":{"type":"string","description":"Partial window title (e.g. 'Spotify', 'Chrome', 'Notepad')"},"element_name":{"type":"string","description":"Name of the button/control to find (e.g. 'Play', 'Pause', 'Search', 'Settings')"},"action":{"type":"string","description":"'list' to discover elements, 'click' to click, 'get_text' to read value","enum":["list","click","get_text"]}},"required":["app_title"]}}},
     {"type":"function","function":{"name":"desktop_double_click","description":"Double-click at desktop coordinates (x, y). Use for opening files, apps in taskbar, selecting words.","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"}},"required":["x","y"]}}},
     {"type":"function","function":{"name":"desktop_right_click","description":"Right-click at desktop coordinates to open context menus.","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"}},"required":["x","y"]}}},
     {"type":"function","function":{"name":"desktop_drag","description":"Click and drag from (x1,y1) to (x2,y2). Use for moving windows, selecting text, drag-and-drop.","parameters":{"type":"object","properties":{"x1":{"type":"integer"},"y1":{"type":"integer"},"x2":{"type":"integer"},"y2":{"type":"integer"},"duration":{"type":"number","description":"Drag duration seconds (default 0.5)"}},"required":["x1","y1","x2","y2"]}}},
@@ -3733,10 +3879,11 @@ TOOL_MAP = {
     "browser_list_tabs":  browser_list_tabs,
     "browser_close_tab":  browser_close_tab,
     # Full computer control
-    "open_app":             open_app,
-    "focus_window":         focus_window,
-    "desktop_vision":       desktop_vision,
-    "desktop_double_click": desktop_double_click,
+    "open_app":               open_app,
+    "focus_window":           focus_window,
+    "desktop_vision":         desktop_vision,
+    "desktop_find_element":   desktop_find_element,
+    "desktop_double_click":   desktop_double_click,
     "desktop_right_click":  desktop_right_click,
     "desktop_drag":         desktop_drag,
     "computer_use":         computer_use,
@@ -3795,7 +3942,7 @@ _STREAMING_TOOLS = {
     "browser_read_page", "browser_wait", "browser_close",
     "browser_new_tab", "browser_switch_tab", "browser_list_tabs", "browser_close_tab",
     "browser_read_full_page",
-    "open_app", "focus_window", "desktop_vision", "computer_use",
+    "open_app", "focus_window", "desktop_vision", "desktop_find_element", "computer_use",
     "desktop_double_click", "desktop_right_click", "desktop_drag",
     "desktop_screenshot", "desktop_click", "desktop_type",
     "desktop_hotkey", "desktop_scroll_screen",

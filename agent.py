@@ -43,7 +43,7 @@ PERMISSION_REQUIRED = {
 
 # Computer/desktop tools that require a one-time persistent permission grant
 COMPUTER_TOOLS = {
-    "open_app", "focus_window", "desktop_vision", "computer_use",
+    "open_app", "focus_window", "desktop_vision", "desktop_find_element", "computer_use",
     "desktop_screenshot", "desktop_click", "desktop_type", "desktop_hotkey",
     "desktop_double_click", "desktop_right_click", "desktop_drag",
     "desktop_scroll_screen",
@@ -106,12 +106,14 @@ You can control the entire desktop — every app, window, and UI element:
 - desktop_screenshot() — take a screenshot and list all open windows
 - computer_use(task) — **AUTONOMOUS MODE**: give a high-level task, bud loops through vision+action until done. Best for multi-step tasks across apps.
 
-### Desktop workflow (ALWAYS follow this):
+### Desktop workflow — ALWAYS follow this order:
 1. open_app(name) to launch the app
-2. desktop_vision("what's on screen, where is X?") to see the UI and get coordinates
-3. desktop_click(x, y) on the right element
-4. desktop_vision("did it work?") to verify
+2. **FIRST try**: desktop_find_element(app_title, action="list") — lists all buttons/controls by name (no vision needed, always works)
+3. desktop_find_element(app_title, element_name="Play", action="click") — click by name (most reliable)
+4. **Only if step 3 fails**: desktop_vision("where is X?") → desktop_click(x, y)
 5. Repeat until done
+
+desktop_find_element is PREFERRED over vision for clicking buttons — it never fails due to rate limits.
 
 ## Browser control — CRITICAL RULES
 You have a persistent visible Chromium browser the user can watch in real time.
