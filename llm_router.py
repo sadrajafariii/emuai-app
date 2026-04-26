@@ -24,11 +24,18 @@ MODELS = [
     "deepseek/deepseek-chat-v3-0324:free",          # Best coding/chat
     "meta-llama/llama-4-maverick:free",             # Llama 4
     "meta-llama/llama-4-scout:free",                # Llama 4 Scout
-    "qwen/qwen3-235b-a22b:free",                    # Qwen 3 large (free)
+    "qwen/qwen3-235b-a22b:free",                    # Qwen 3 large
     "qwen/qwen3-30b-a3b:free",                      # Qwen 3 medium
     "nousresearch/hermes-3-llama-3.1-405b:free",    # Hermes 405B
     "google/gemma-3-27b-it:free",                   # Gemma 3 27B
+    "google/gemma-3-12b-it:free",                   # Gemma 3 12B
+    "google/gemma-3-4b-it:free",                    # Gemma 3 4B
+    "google/gemma-3n-e4b-it:free",                  # Gemma 3n 4B (mobile-optimized)
+    "google/gemma-3n-e2b-it:free",                  # Gemma 3n 2B
     "meta-llama/llama-3.3-70b-instruct:free",       # Llama 3.3 70B
+    "meta-llama/llama-3.2-3b-instruct:free",        # Llama 3.2 3B (fast fallback)
+    "venice-ai/venice-uncensored:free",             # Venice Uncensored Mistral 24B
+    "baidu/qianfan-ocr-fast:free",                  # Baidu OCR (multimodal)
 ]
 
 COOLDOWN_SECONDS = 60
@@ -41,6 +48,8 @@ _NO_FUNCTION_CALLING = {
     "google/gemma-3n-e4b-it:free",
     "google/gemma-3n-e2b-it:free",
     "meta-llama/llama-3.2-3b-instruct:free",
+    "venice-ai/venice-uncensored:free",
+    "baidu/qianfan-ocr-fast:free",
 }
 
 # Models that support native <think> reasoning blocks
