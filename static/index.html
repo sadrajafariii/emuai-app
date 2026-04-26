@@ -102,9 +102,9 @@
     #mic-btn{transition:all .2s;}
     #mic-btn.recording{background:#c0392b!important;box-shadow:0 0 0 4px #c0392b33;animation:micPulse 1s ease-in-out infinite;}
     @keyframes micPulse{0%,100%{box-shadow:0 0 0 4px #c0392b33}50%{box-shadow:0 0 0 8px #c0392b11}}
-    .msg-action-btn{display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .55rem;border-radius:6px;font-size:.68rem;font-family:'JetBrains Mono',monospace;color:#6b6055;background:#1a1714;border:1px solid #2a2520;cursor:pointer;transition:color .15s,border-color .15s;}
-    .msg-action-btn:hover{color:#c8a45e;border-color:#c8a45e55;}
-    .msg-action-btn.copied{color:#4caf7d;border-color:#4caf7d55;}
+    .msg-action-btn{display:inline-flex;align-items:center;justify-content:center;width:1.6rem;height:1.6rem;border-radius:5px;color:#4a4035;background:transparent;border:none;cursor:pointer;transition:color .12s,background .12s;}
+    .msg-action-btn:hover{color:#a08060;background:#1e1b1733;}
+    .msg-action-btn.copied{color:#5a8a6a;}
 
     #chat-messages.drag-over{outline:2px dashed #c8a45e;outline-offset:-6px;}
     .attached-file{display:inline-flex;align-items:center;gap:.4rem;background:#201e1b;border:1px solid #352f28;border-radius:6px;padding:.25rem .6rem;font-size:.7rem;font-family:'JetBrains Mono',monospace;color:#8a7e6e;margin:.25rem .25rem 0 0;}
@@ -1424,14 +1424,12 @@ function appendUserMessage(text) {
   el.innerHTML = `
     <div class="flex flex-col items-end gap-1 max-w-lg">
       <div class="px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed text-cream" style="background:#1e1b17;border:1px solid #2a2520;">${escHtml(text).replace(/\n/g,'<br/>')}</div>
-      <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onclick="copyText(this,${JSON.stringify(text)})" class="msg-action-btn" title="Copy">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
-          Copy
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
         </button>
         <button onclick="retryMessage(${JSON.stringify(text)})" class="msg-action-btn" title="Retry">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/><path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 7.757 2.997a.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/></svg>
-          Retry
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/><path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 7.757 2.997a.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/></svg>
         </button>
       </div>
     </div>`;
@@ -1450,10 +1448,9 @@ function appendAssistantMessage(md) {
     </div>
     <div class="flex-1 min-w-0">
       <div class="prose text-sm text-cream max-w-2xl" id="${id}">${renderMarkdown(md)}</div>
-      <div class="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div class="flex gap-0.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onclick="copyText(this,${JSON.stringify(md)})" class="msg-action-btn" title="Copy">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
-          Copy
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
         </button>
       </div>
     </div>`;
@@ -1492,10 +1489,8 @@ function finalizeMessage(tokenUsage) {
     // Add copy button row below streamed message
     const captured = pendingContent;
     const btnRow = document.createElement('div');
-    btnRow.className = 'flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity';
-    btnRow.innerHTML = `<button class="msg-action-btn" title="Copy">
-      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
-      Copy</button>`;
+    btnRow.className = 'flex gap-0.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity';
+    btnRow.innerHTML = `<button class="msg-action-btn" title="Copy"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg></button>`;
     btnRow.querySelector('button').onclick = function() { copyText(this, captured); };
     // Insert after the prose div (pendingAssistantEl's parent flex container)
     const parent = pendingAssistantEl.parentElement;
@@ -1540,9 +1535,9 @@ function retryMessage(text) {
 
 function addArtifactButton(el, html) {
   const btn = document.createElement('button');
-  btn.className = 'mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors';
-  btn.style.cssText = 'background:#1a2a1a;border:1px solid #2a5a2a;color:#4caf7d;';
-  btn.innerHTML = '🚀 Open Live Preview';
+  btn.className = 'mt-3 flex items-center gap-1.5 text-xs transition-colors';
+  btn.style.cssText = 'background:none;border:none;color:#5a5045;cursor:pointer;padding:0;font-family:inherit;letter-spacing:.02em;';
+  btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M0 5a2 2 0 0 1 2-2h7.5a2 2 0 0 1 1.983 1.738l3.11-1.382A1 1 0 0 1 16 4.269v7.462a1 1 0 0 1-1.406.913l-3.111-1.382A2 2 0 0 1 9.5 13H2a2 2 0 0 1-2-2V5z"/></svg> Open preview';
   btn.onclick = () => {
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
