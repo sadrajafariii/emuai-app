@@ -130,7 +130,7 @@ class BrowserSession:
                     if (seen.has(key)) return false;
                     seen.add(key);
                     return true;
-                }).slice(0, 40);
+                }).slice(0, 25);
             }""")
             if not data:
                 return ""

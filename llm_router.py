@@ -90,8 +90,8 @@ def _is_available(model: str) -> bool:
     return False
 
 
-def _cooldown(model: str):
-    _cooldowns[model] = time.time() + COOLDOWN_SECONDS
+def _cooldown(model: str, seconds: int = None):
+    _cooldowns[model] = time.time() + (seconds if seconds is not None else COOLDOWN_SECONDS)
     logger.warning("⏳ Model %s rate-limited — cooling down %ds", model, COOLDOWN_SECONDS)
 
 
@@ -351,6 +351,8 @@ async def chat_completion(
             msg = str(exc)
             if "429" in msg or "rate limit" in msg.lower():
                 _cooldown(model)
+            elif "502" in msg or "503" in msg or "provider" in msg.lower():
+                _cooldown(model, seconds=30)  # short cooldown for provider errors
             else:
                 logger.warning("✗ %s failed: %s", model, exc)
             last_error = exc
