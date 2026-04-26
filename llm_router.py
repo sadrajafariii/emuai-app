@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 # ── editable model fallback chain ─────────────────────────────────────────────
 MODELS = [
-    "qwen/qwen3-235b-a22b-instruct-2507",           # Primary: cheapest, best value
     "z-ai/glm-4.5-air:free",                        # Free, MoE, thinking + tool use
     "deepseek/deepseek-r1:free",                    # Best reasoning, shows thinking
     "deepseek/deepseek-chat-v3-0324:free",          # Best coding/chat
