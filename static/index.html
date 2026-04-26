@@ -464,6 +464,37 @@
   </div>
 </div>
 
+<!-- ══ COMPUTER ACCESS MODAL ══════════════════════════════════════════════════ -->
+<div id="computer-access-modal" style="display:none;position:fixed;inset:0;background:#000000bb;z-index:700;align-items:center;justify-content:center;">
+  <div style="background:#141210;border:1px solid #c8a45e55;border-radius:16px;padding:2rem;max-width:420px;width:90%;box-shadow:0 24px 60px #000a;">
+    <div class="flex items-center gap-3 mb-5">
+      <div style="width:44px;height:44px;border-radius:50%;background:#1a1208;border:2px solid #c8a45e66;display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">🖥️</div>
+      <div>
+        <p style="font-size:.95rem;font-family:Georgia,serif;color:#e4d8c4;font-weight:600;">Full Computer Access</p>
+        <p style="font-size:.72rem;color:#6a5f52;margin-top:2px;">One-time permission request</p>
+      </div>
+    </div>
+    <div style="background:#0c0a08;border:1px solid #2a2520;border-radius:10px;padding:1rem;margin-bottom:1.25rem;">
+      <p style="font-size:.8rem;color:#b8a898;line-height:1.6;" id="computer-access-desc"></p>
+    </div>
+    <div style="background:#1a1208;border:1px solid #c8a45e33;border-radius:8px;padding:.85rem;margin-bottom:1.25rem;">
+      <p style="font-size:.72rem;color:#8a7a62;line-height:1.7;">
+        <strong style="color:#c8a45e;">This allows bud to:</strong><br>
+        • Open and control any application<br>
+        • Click, type, and navigate in any app<br>
+        • Take screenshots of your screen<br>
+        • Drag, drop, and use keyboard shortcuts<br>
+        • See everything on your display
+      </p>
+    </div>
+    <p style="font-size:.72rem;color:#4a4038;margin-bottom:1.25rem;">This permission is saved permanently. You can revoke it anytime in Settings → Privacy.</p>
+    <div style="display:flex;gap:.75rem;">
+      <button onclick="respondComputerAccess(true)" style="flex:1;padding:.65rem;border-radius:10px;background:#1a3a22;border:1px solid #2a6a3a;color:#4caf7d;font-size:.82rem;font-weight:600;cursor:pointer;">Allow Full Access</button>
+      <button onclick="respondComputerAccess(false)" style="flex:1;padding:.65rem;border-radius:10px;background:#2a1010;border:1px solid #5a2020;color:#e06060;font-size:.82rem;font-weight:600;cursor:pointer;">Deny</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ SETTINGS MODAL ═════════════════════════════════════════════════════════ -->
 <div id="settings-modal" onclick="closeSettingsIfOutside(event)">
   <div class="settings-box">
@@ -1364,6 +1395,7 @@ function handleEvent(ev) {
   if (ev.type === 'session_created')  { onSessionCreated(ev.session); return; }
   if (ev.type === 'history')          { renderHistory(ev.messages, ev.sessions); return; }
   if (ev.type === 'permission_request') { showPermissionModal(ev.session_id, ev.tool, ev.description); return; }
+  if (ev.type === 'computer_access_request') { showComputerAccessModal(ev.description); return; }
   if (ev.type === 'scheduled_task_done') {
     ws.send(JSON.stringify({ type: 'list_sessions' }));
     browserNotify('bud — Task Done', ev.task || 'Scheduled task completed');
@@ -1871,6 +1903,17 @@ function respondPermission(granted) {
     ws.send(JSON.stringify({ type: 'permission_response', session_id: _permSessionId, tool: _permTool, granted }));
   }
   _permTool = null; _permSessionId = null;
+}
+
+// ─── Computer Access modal ────────────────────────────────────────────────────
+function showComputerAccessModal(description) {
+  document.getElementById('computer-access-desc').textContent = description || 'bud is requesting full computer access.';
+  document.getElementById('computer-access-modal').style.display = 'flex';
+}
+
+function respondComputerAccess(granted) {
+  document.getElementById('computer-access-modal').style.display = 'none';
+  ws.send(JSON.stringify({ type: 'computer_access_response', granted }));
 }
 
 // ─── Tool result ──────────────────────────────────────────────────────────────

@@ -168,6 +168,12 @@ async def init_db():
                 content TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS computer_access (
+                user_id TEXT PRIMARY KEY,
+                granted INTEGER DEFAULT 0,
+                granted_at TEXT DEFAULT (datetime('now'))
+            );
         """)
 
         # FTS5 virtual tables for fast full-text memory/vault search
@@ -997,6 +1003,29 @@ async def delete_project(project_id: str, user_id: str):
 
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
+
+async def check_computer_access(user_id: str) -> bool:
+    if not user_id:
+        return False
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT granted FROM computer_access WHERE user_id=?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+    return bool(row and row["granted"])
+
+
+async def grant_computer_access(user_id: str, granted: bool = True):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO computer_access (user_id, granted, granted_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(user_id) DO UPDATE SET granted=excluded.granted, granted_at=excluded.granted_at""",
+            (user_id, 1 if granted else 0),
+        )
+        await db.commit()
+
 
 async def create_prompt(user_id: str, title: str, content: str) -> dict:
     pid = str(uuid.uuid4())[:8]

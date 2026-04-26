@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 import db
 import settings_store
-from agent import run_agent, resolve_permission, reset_session_permissions, stop_agent, _active_tasks
+from agent import run_agent, resolve_permission, resolve_computer_access, reset_session_permissions, stop_agent, _active_tasks
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, get_user_from_ws,
@@ -713,6 +713,26 @@ async def delete_prompt_ep(prompt_id: str, request: Request):
     return {"ok": True}
 
 
+# ── Computer access permission ───────────────────────────────────────────────
+
+@app.get("/api/computer-access")
+async def get_computer_access(request: Request):
+    try:
+        user = get_current_user(request)
+        granted = await db.check_computer_access(user["id"])
+        return JSONResponse({"granted": granted})
+    except Exception:
+        return JSONResponse({"granted": False})
+
+@app.post("/api/computer-access")
+async def set_computer_access(request: Request):
+    user = get_current_user(request)
+    body = await request.json()
+    granted = bool(body.get("granted", False))
+    await db.grant_computer_access(user["id"], granted)
+    return JSONResponse({"ok": True, "granted": granted})
+
+
 # ── Skill router ─────────────────────────────────────────────────────────────
 
 @app.get("/api/skills")
@@ -1080,6 +1100,14 @@ async def websocket_endpoint(ws: WebSocket):
                 granted = bool(data.get("granted", False))
                 if sid and tool:
                     resolve_permission(sid, tool, granted)
+
+            elif msg_type == "computer_access_response":
+                granted = bool(data.get("granted", False))
+                if user_id:
+                    resolve_computer_access(user_id, granted)
+                    if granted:
+                        await db.grant_computer_access(user_id, True)
+                    await send({"type": "computer_access_result", "granted": granted})
 
             elif msg_type == "new_session":
                 session = await db.create_session(user_id=user_id)

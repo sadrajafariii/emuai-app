@@ -32,7 +32,7 @@ current_user_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("cu
 
 logger = logging.getLogger(__name__)
 
-# Tools that require user permission before running
+# Tools that require user permission before running (per-session)
 PERMISSION_REQUIRED = {
     "run_terminal",
     "write_system_file",
@@ -40,6 +40,20 @@ PERMISSION_REQUIRED = {
     "read_system_file",
     "download_video",
 }
+
+# Computer/desktop tools that require a one-time persistent permission grant
+COMPUTER_TOOLS = {
+    "open_app", "focus_window", "desktop_vision", "computer_use",
+    "desktop_screenshot", "desktop_click", "desktop_type", "desktop_hotkey",
+    "desktop_double_click", "desktop_right_click", "desktop_drag",
+    "desktop_scroll_screen",
+}
+
+# Per-session computer access cache (avoids repeated DB hits)
+_computer_access_cache: dict[str, bool] = {}  # user_id -> granted
+
+# Per-session pending computer access futures
+_pending_computer_access: dict[str, asyncio.Future] = {}  # user_id -> Future
 
 # Per-session permission cache: session_id -> set of approved tool names
 _session_permissions: dict[str, set] = {}
@@ -73,6 +87,28 @@ You have full access to the user's computer:
 - read_system_file(path) — read any file (Documents, Desktop, Downloads, etc).
 - write_system_file(path, content) — save files anywhere.
 - download_video(url) — download videos from YouTube, Twitter, TikTok, Instagram, etc.
+
+## Full Desktop / GUI Control (any app, any window)
+You can control the entire desktop — every app, window, and UI element:
+- open_app(name) — launch any app: 'chrome', 'spotify', 'notepad', 'vscode', 'discord', 'calculator', etc.
+- focus_window(title) — bring any window to the foreground by partial title match
+- desktop_vision(question) — **CRITICAL: always call this after opening an app** to see what's on screen and get coordinates before clicking. Vision AI reads text and finds UI elements.
+- desktop_click(x, y) — click anywhere on screen
+- desktop_double_click(x, y) — double-click (open files, apps)
+- desktop_right_click(x, y) — right-click for context menus
+- desktop_type(text) — type into the focused element
+- desktop_hotkey(keys) — keyboard shortcuts: 'ctrl+c', 'win+r', 'alt+f4', 'ctrl+shift+t'
+- desktop_drag(x1, y1, x2, y2) — drag and drop
+- desktop_scroll_screen(direction, clicks) — scroll anywhere
+- desktop_screenshot() — take a screenshot and list all open windows
+- computer_use(task) — **AUTONOMOUS MODE**: give a high-level task, bud loops through vision+action until done. Best for multi-step tasks across apps.
+
+### Desktop workflow (ALWAYS follow this):
+1. open_app(name) to launch the app
+2. desktop_vision("what's on screen, where is X?") to see the UI and get coordinates
+3. desktop_click(x, y) on the right element
+4. desktop_vision("did it work?") to verify
+5. Repeat until done
 
 ## Browser control — CRITICAL RULES
 You have a persistent visible Chromium browser the user can watch in real time.
@@ -481,6 +517,49 @@ async def run_agent(
             "workflow_run",
         }
 
+        # ── Computer access gate (persistent, per-user) ───────────────────────
+        needs_computer = any(tc["name"] in COMPUTER_TOOLS for tc in tool_calls)
+        if needs_computer and user_id:
+            granted = _computer_access_cache.get(user_id)
+            if granted is None:
+                granted = await db.check_computer_access(user_id)
+                _computer_access_cache[user_id] = granted
+
+            if not granted:
+                # Ask for persistent permission — one-time ever
+                fut: asyncio.Future = asyncio.get_event_loop().create_future()
+                _pending_computer_access[user_id] = fut
+                await emit({
+                    "type": "computer_access_request",
+                    "session_id": session_id,
+                    "description": (
+                        "bud wants full computer access — it can open apps, "
+                        "click, type, take screenshots, and control anything on your screen. "
+                        "This permission is stored permanently and you won't be asked again."
+                    ),
+                })
+                try:
+                    granted = await asyncio.wait_for(fut, timeout=120)
+                except asyncio.TimeoutError:
+                    granted = False
+                finally:
+                    _pending_computer_access.pop(user_id, None)
+
+                if granted:
+                    await db.grant_computer_access(user_id, True)
+                    _computer_access_cache[user_id] = True
+                else:
+                    _computer_access_cache[user_id] = False
+                    result_text = "User denied computer access permission."
+                    for tc in tool_calls:
+                        if tc["name"] in COMPUTER_TOOLS:
+                            await emit({"type": "tool_result", "tool": tc["name"],
+                                        "output": result_text, "status": "denied"})
+                    # Remove computer tools from this batch
+                    tool_calls = [tc for tc in tool_calls if tc["name"] not in COMPUTER_TOOLS]
+                    if not tool_calls:
+                        continue
+
         # Separate into sequential (need order/shared state) and parallel (independent)
         needs_permission = [tc for tc in tool_calls if tc["name"] in PERMISSION_REQUIRED]
         sequential = [tc for tc in tool_calls if tc["name"] in _SEQUENTIAL_TOOLS]
@@ -645,6 +724,13 @@ async def _request_permission(
         return False
     finally:
         _pending_permissions.get(session_id, {}).pop(tool_name, None)
+
+
+def resolve_computer_access(user_id: str, granted: bool):
+    """Called when the user responds to a computer access permission request."""
+    fut = _pending_computer_access.get(user_id)
+    if fut and not fut.done():
+        fut.set_result(granted)
 
 
 def resolve_permission(session_id: str, tool_name: str, granted: bool):

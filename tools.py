@@ -805,6 +805,389 @@ async def notify_desktop(title: str, message: str) -> dict:
         return {"output": f"Notification error: {exc}", "image_path": None}
 
 
+# ── tool: open app ────────────────────────────────────────────────────────────
+
+async def open_app(name: str, _send=None) -> dict:
+    """
+    Open any application on the computer by name.
+    Examples: 'chrome', 'notepad', 'spotify', 'calculator', 'vscode', 'explorer'
+    Works on Windows, macOS, and Linux.
+    """
+    import platform
+    loop = asyncio.get_event_loop()
+    sys_platform = platform.system()
+
+    def _open():
+        # Windows
+        if sys_platform == "Windows":
+            # Common app aliases
+            aliases = {
+                "chrome": "chrome",
+                "google chrome": "chrome",
+                "firefox": "firefox",
+                "brave": "brave",
+                "edge": "msedge",
+                "notepad": "notepad",
+                "calculator": "calc",
+                "explorer": "explorer",
+                "paint": "mspaint",
+                "word": "winword",
+                "excel": "excel",
+                "powerpoint": "powerpnt",
+                "outlook": "outlook",
+                "teams": "teams",
+                "discord": "discord",
+                "spotify": "spotify",
+                "vscode": "code",
+                "visual studio code": "code",
+                "terminal": "cmd",
+                "cmd": "cmd",
+                "powershell": "powershell",
+                "task manager": "taskmgr",
+                "settings": "ms-settings:",
+                "control panel": "control",
+                "snipping tool": "snippingtool",
+                "vlc": "vlc",
+                "zoom": "zoom",
+                "slack": "slack",
+                "whatsapp": "whatsapp",
+                "telegram": "telegram",
+            }
+            cmd = aliases.get(name.lower().strip(), name)
+            try:
+                if cmd.startswith("ms-"):
+                    import os
+                    os.startfile(cmd)
+                else:
+                    subprocess.Popen(
+                        f'start "" "{cmd}"', shell=True,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                return f"Launched: {name}"
+            except Exception:
+                # Fallback: Windows Run dialog via shell
+                subprocess.Popen(["powershell", "-Command", f"Start-Process '{cmd}'"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return f"Launched (powershell): {name}"
+
+        # macOS
+        elif sys_platform == "Darwin":
+            try:
+                subprocess.Popen(["open", "-a", name],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return f"Launched: {name}"
+            except Exception:
+                subprocess.Popen(["open", name],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return f"Launched: {name}"
+
+        # Linux
+        else:
+            aliases_linux = {
+                "chrome": "google-chrome", "firefox": "firefox",
+                "calculator": "gnome-calculator", "terminal": "gnome-terminal",
+                "files": "nautilus", "settings": "gnome-control-center",
+            }
+            cmd = aliases_linux.get(name.lower(), name.lower().replace(" ", "-"))
+            subprocess.Popen([cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return f"Launched: {name}"
+
+    try:
+        result = await loop.run_in_executor(None, _open)
+        await asyncio.sleep(1.5)  # wait for app to appear
+        img_path = await loop.run_in_executor(None, _desktop_snap)
+        if _send:
+            await _send({"type": "browser_frame", "url": "desktop://",
+                         "action": f"Opened: {name}", "image_path": img_path})
+        return {"output": result, "image_path": img_path}
+    except Exception as exc:
+        return {"output": f"open_app error: {exc}", "image_path": None}
+
+
+async def focus_window(title: str, _send=None) -> dict:
+    """
+    Find and bring a window to the foreground by its title (partial match).
+    Example: focus_window('Notepad'), focus_window('Chrome')
+    """
+    try:
+        import pygetwindow as gw
+        loop = asyncio.get_event_loop()
+
+        def _focus():
+            windows = gw.getAllWindows()
+            matches = [w for w in windows if title.lower() in w.title.lower() and w.title.strip()]
+            if not matches:
+                titles = [w.title for w in windows if w.title.strip()]
+                return None, titles
+            win = matches[0]
+            try:
+                win.restore()
+                win.activate()
+            except Exception:
+                pass
+            return win.title, None
+
+        found, available = await loop.run_in_executor(None, _focus)
+        await asyncio.sleep(0.5)
+        img_path = await loop.run_in_executor(None, _desktop_snap)
+        if _send:
+            action = f"Focused: {found}" if found else f"Window not found: {title}"
+            await _send({"type": "browser_frame", "url": "desktop://",
+                         "action": action, "image_path": img_path})
+        if found:
+            return {"output": f"Focused window: {found}", "image_path": img_path}
+        else:
+            avail = "\n".join(f"  • {t}" for t in (available or [])[:20])
+            return {"output": f"No window matching '{title}'. Open windows:\n{avail}", "image_path": img_path}
+    except Exception as exc:
+        return {"output": f"focus_window error: {exc}", "image_path": None}
+
+
+async def desktop_vision(question: str = "What is on screen?", _send=None) -> dict:
+    """
+    Take a desktop screenshot and use vision AI to understand what's on screen.
+    Use this to read text, find UI elements, understand the current app state,
+    or decide where to click. ALWAYS call this before clicking on apps you opened.
+    """
+    try:
+        import settings_store as _ss
+        from openai import AsyncOpenAI
+        from io import BytesIO
+        import pyautogui, base64
+
+        loop = asyncio.get_event_loop()
+
+        def _snap():
+            img = pyautogui.screenshot()
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue(), img.size
+
+        png, (w, h) = await loop.run_in_executor(None, _snap)
+        b64 = base64.b64encode(png).decode()
+
+        # Save for display
+        name = f"{uuid.uuid4().hex}.png"
+        (SCREENSHOTS_DIR / name).write_bytes(png)
+        img_path = f"/static/screenshots/{name}"
+
+        if _send:
+            await _send({"type": "browser_frame", "url": "desktop://",
+                         "action": "Desktop vision scan", "image_path": img_path})
+
+        cfg = _ss.load()
+        api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
+        client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+
+        response = await client.chat.completions.create(
+            model="meta-llama/llama-4-maverick:free",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    {"type": "text", "text": (
+                        f"{question}\n\n"
+                        f"Screen resolution: {w}×{h}px. "
+                        "If asked to find UI elements, describe their approximate x,y coordinates "
+                        "so desktop_click() can be called. Be precise about locations."
+                    )},
+                ]
+            }],
+            timeout=30,
+        )
+        answer = response.choices[0].message.content or "Could not analyze screen."
+        return {"output": f"**Vision ({w}×{h}):** {answer}", "image_path": img_path}
+
+    except Exception as exc:
+        return {"output": f"desktop_vision error: {exc}", "image_path": None}
+
+
+async def desktop_double_click(x: int, y: int, _send=None) -> dict:
+    """Double-click at desktop coordinates. Use for opening files, selecting words, etc."""
+    try:
+        import pyautogui
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: pyautogui.doubleClick(x, y))
+        await asyncio.sleep(0.5)
+        img_path = await loop.run_in_executor(None, _desktop_snap)
+        if _send:
+            await _send({"type": "browser_frame", "url": "desktop://",
+                         "action": f"Double-clicked ({x},{y})", "image_path": img_path})
+        return {"output": f"Double-clicked at ({x}, {y})", "image_path": img_path}
+    except Exception as exc:
+        return {"output": f"desktop_double_click error: {exc}", "image_path": None}
+
+
+async def desktop_right_click(x: int, y: int, _send=None) -> dict:
+    """Right-click at desktop coordinates to open context menus."""
+    try:
+        import pyautogui
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: pyautogui.rightClick(x, y))
+        await asyncio.sleep(0.4)
+        img_path = await loop.run_in_executor(None, _desktop_snap)
+        if _send:
+            await _send({"type": "browser_frame", "url": "desktop://",
+                         "action": f"Right-clicked ({x},{y})", "image_path": img_path})
+        return {"output": f"Right-clicked at ({x}, {y})", "image_path": img_path}
+    except Exception as exc:
+        return {"output": f"desktop_right_click error: {exc}", "image_path": None}
+
+
+async def desktop_drag(x1: int, y1: int, x2: int, y2: int,
+                       duration: float = 0.5, _send=None) -> dict:
+    """Drag from (x1,y1) to (x2,y2). Use for moving windows, selecting text, drag-and-drop."""
+    try:
+        import pyautogui
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: pyautogui.moveTo(x1, y1, duration=0.2))
+        await loop.run_in_executor(None, lambda: pyautogui.dragTo(x2, y2, duration=duration, button="left"))
+        await asyncio.sleep(0.4)
+        img_path = await loop.run_in_executor(None, _desktop_snap)
+        if _send:
+            await _send({"type": "browser_frame", "url": "desktop://",
+                         "action": f"Dragged ({x1},{y1})→({x2},{y2})", "image_path": img_path})
+        return {"output": f"Dragged from ({x1},{y1}) to ({x2},{y2})", "image_path": img_path}
+    except Exception as exc:
+        return {"output": f"desktop_drag error: {exc}", "image_path": None}
+
+
+async def computer_use(task: str, max_steps: int = 10, _send=None) -> dict:
+    """
+    Autonomously complete a computer task using vision + actions.
+    Takes a screenshot, understands the screen with vision AI, decides what to do,
+    executes the action, and repeats until the task is done.
+    Use for: 'open Chrome and go to gmail', 'find and click the settings button', etc.
+    """
+    import llm_router as _lr
+    import settings_store as _ss
+    from openai import AsyncOpenAI
+    from io import BytesIO
+    import pyautogui, base64
+
+    loop = asyncio.get_event_loop()
+    step_log = []
+
+    async def _status(msg):
+        if _send:
+            await _send({"type": "status", "content": msg})
+
+    async def _snap_b64():
+        def _do():
+            img = pyautogui.screenshot()
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            w, h = img.size
+            return base64.b64encode(buf.getvalue()).decode(), w, h
+        return await loop.run_in_executor(None, _do)
+
+    cfg = _ss.load()
+    api_key = cfg.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", "")
+    client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+
+    try:
+        for step in range(max_steps):
+            await _status(f"Computer use step {step+1}/{max_steps}…")
+
+            b64, w, h = await _snap_b64()
+            name = f"{uuid.uuid4().hex}.png"
+            (SCREENSHOTS_DIR / name).write_bytes(base64.b64decode(b64))
+            img_path = f"/static/screenshots/{name}"
+            if _send:
+                await _send({"type": "browser_frame", "url": "desktop://",
+                             "action": f"Step {step+1}: analyzing screen", "image_path": img_path})
+
+            # Ask vision model what action to take
+            response = await client.chat.completions.create(
+                model="meta-llama/llama-4-maverick:free",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        {"type": "text", "text": (
+                            f"Task: {task}\n"
+                            f"Step: {step+1} of max {max_steps}\n"
+                            f"Previous steps: {'; '.join(step_log) or 'none'}\n"
+                            f"Screen: {w}×{h}px\n\n"
+                            "Look at the screenshot and decide the NEXT single action to take.\n"
+                            "Reply with EXACTLY ONE of these formats:\n"
+                            "  CLICK x,y — click at coordinates\n"
+                            "  DOUBLE_CLICK x,y — double click\n"
+                            "  RIGHT_CLICK x,y — right click\n"
+                            "  TYPE text — type this text (use after clicking a text field)\n"
+                            "  HOTKEY keys — press shortcut (e.g. ctrl+c, win+r, alt+f4)\n"
+                            "  OPEN app_name — open an application\n"
+                            "  WAIT — wait 1 second (use if loading)\n"
+                            "  DONE: result — task is complete, describe result\n\n"
+                            "Be precise with coordinates. Describe what you see first, then the action."
+                        )},
+                    ]
+                }],
+                timeout=30,
+            )
+
+            decision = (response.choices[0].message.content or "").strip()
+            step_log.append(f"Step {step+1}: {decision[:80]}")
+
+            # Parse and execute
+            if decision.upper().startswith("DONE"):
+                result_text = decision.split(":", 1)[1].strip() if ":" in decision else "Task completed."
+                return {"output": f"✓ Task completed in {step+1} steps:\n{result_text}\n\nSteps taken:\n" + "\n".join(step_log), "image_path": img_path}
+
+            elif decision.upper().startswith("CLICK"):
+                coords = decision.split()[-1] if decision.split() else "0,0"
+                try:
+                    x_str, y_str = coords.split(",")
+                    x, y = int(x_str.strip()), int(y_str.strip())
+                    await loop.run_in_executor(None, lambda: pyautogui.click(x, y))
+                    await asyncio.sleep(0.6)
+                except Exception:
+                    pass
+
+            elif decision.upper().startswith("DOUBLE_CLICK"):
+                coords = decision.split()[-1] if decision.split() else "0,0"
+                try:
+                    x_str, y_str = coords.split(",")
+                    x, y = int(x_str.strip()), int(y_str.strip())
+                    await loop.run_in_executor(None, lambda: pyautogui.doubleClick(x, y))
+                    await asyncio.sleep(0.6)
+                except Exception:
+                    pass
+
+            elif decision.upper().startswith("RIGHT_CLICK"):
+                coords = decision.split()[-1] if decision.split() else "0,0"
+                try:
+                    x_str, y_str = coords.split(",")
+                    x, y = int(x_str.strip()), int(y_str.strip())
+                    await loop.run_in_executor(None, lambda: pyautogui.rightClick(x, y))
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+
+            elif decision.upper().startswith("TYPE"):
+                text = decision[5:].strip()
+                await loop.run_in_executor(None, lambda: pyautogui.typewrite(text, interval=0.04))
+                await asyncio.sleep(0.3)
+
+            elif decision.upper().startswith("HOTKEY"):
+                keys_str = decision[7:].strip()
+                key_list = [k.strip() for k in keys_str.split("+")]
+                await loop.run_in_executor(None, lambda: pyautogui.hotkey(*key_list))
+                await asyncio.sleep(0.7)
+
+            elif decision.upper().startswith("OPEN"):
+                app = decision[5:].strip()
+                await open_app(app, _send=_send)
+
+            elif decision.upper().startswith("WAIT"):
+                await asyncio.sleep(1.5)
+
+        return {"output": f"Reached max steps ({max_steps}). Progress:\n" + "\n".join(step_log), "image_path": None}
+
+    except Exception as exc:
+        return {"output": f"computer_use error: {exc}\nProgress: {'; '.join(step_log)}", "image_path": None}
+
+
 # ── tool: desktop control (pyautogui) ─────────────────────────────────────────
 
 def _desktop_snap() -> str:
@@ -2553,6 +2936,15 @@ TOOL_SCHEMAS = [
     # ── Desktop notifications ─────────────────────────────────────────────────
     {"type":"function","function":{"name":"notify_desktop","description":"Send a native desktop notification to the user (Windows/Mac/Linux).","parameters":{"type":"object","properties":{"title":{"type":"string"},"message":{"type":"string"}},"required":["title","message"]}}},
 
+    # ── Full Computer Control ─────────────────────────────────────────────────
+    {"type":"function","function":{"name":"open_app","description":"Open any application on the computer by name. Examples: 'chrome', 'spotify', 'notepad', 'vscode', 'calculator', 'discord'. Works on Windows, macOS, Linux.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Application name to open"}},"required":["name"]}}},
+    {"type":"function","function":{"name":"focus_window","description":"Find a window by title and bring it to the foreground. Partial match. Example: focus_window('Notepad'), focus_window('Chrome').","parameters":{"type":"object","properties":{"title":{"type":"string","description":"Partial window title to search for"}},"required":["title"]}}},
+    {"type":"function","function":{"name":"desktop_vision","description":"Take a full desktop screenshot and use vision AI to understand what is on screen — read text, find buttons, get coordinates for clicking. ALWAYS call after opening an app before clicking anything.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze (default: What is on screen?)"}},"required":[]}}},
+    {"type":"function","function":{"name":"desktop_double_click","description":"Double-click at desktop coordinates (x, y). Use for opening files, apps in taskbar, selecting words.","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"}},"required":["x","y"]}}},
+    {"type":"function","function":{"name":"desktop_right_click","description":"Right-click at desktop coordinates to open context menus.","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"}},"required":["x","y"]}}},
+    {"type":"function","function":{"name":"desktop_drag","description":"Click and drag from (x1,y1) to (x2,y2). Use for moving windows, selecting text, drag-and-drop.","parameters":{"type":"object","properties":{"x1":{"type":"integer"},"y1":{"type":"integer"},"x2":{"type":"integer"},"y2":{"type":"integer"},"duration":{"type":"number","description":"Drag duration seconds (default 0.5)"}},"required":["x1","y1","x2","y2"]}}},
+    {"type":"function","function":{"name":"computer_use","description":"Autonomously complete any computer task using vision AI and desktop actions in a loop. Handles multi-step tasks across any app: open apps, click, type, search, fill forms — all by seeing the screen. Use for tasks like: open Spotify and play jazz, fill this form in Excel, find settings in any app.","parameters":{"type":"object","properties":{"task":{"type":"string","description":"The task to complete on the computer"},"max_steps":{"type":"integer","description":"Max action steps (default 10)"}},"required":["task"]}}},
+
     # ── Desktop control ───────────────────────────────────────────────────────
     {
         "type": "function",
@@ -3230,6 +3622,14 @@ TOOL_MAP = {
     "browser_switch_tab": browser_switch_tab,
     "browser_list_tabs":  browser_list_tabs,
     "browser_close_tab":  browser_close_tab,
+    # Full computer control
+    "open_app":             open_app,
+    "focus_window":         focus_window,
+    "desktop_vision":       desktop_vision,
+    "desktop_double_click": desktop_double_click,
+    "desktop_right_click":  desktop_right_click,
+    "desktop_drag":         desktop_drag,
+    "computer_use":         computer_use,
     # New tools
     "read_document":        read_document,
     "api_discover":         api_discover,
@@ -3285,6 +3685,8 @@ _STREAMING_TOOLS = {
     "browser_read_page", "browser_wait", "browser_close",
     "browser_new_tab", "browser_switch_tab", "browser_list_tabs", "browser_close_tab",
     "browser_read_full_page",
+    "open_app", "focus_window", "desktop_vision", "computer_use",
+    "desktop_double_click", "desktop_right_click", "desktop_drag",
     "desktop_screenshot", "desktop_click", "desktop_type",
     "desktop_hotkey", "desktop_scroll_screen",
     "run_terminal", "workflow_run",
