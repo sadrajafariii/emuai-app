@@ -73,6 +73,8 @@ class BrowserSession:
                 "--no-default-browser-check",
                 "--disable-features=IsolateOrigins,site-per-process",
                 f"--window-size={vw},{vh}",
+                "--lang=en-US",                    # force Chrome UI + content language
+                "--accept-lang=en-US,en;q=0.9",   # HTTP Accept-Language header
             ],
             viewport={"width": vw, "height": vh},
             user_agent=(
@@ -91,6 +93,11 @@ class BrowserSession:
         self._context = await self._pw.chromium.launch_persistent_context(
             str(PROFILE_DIR), **launch_kwargs
         )
+
+        # Force English on every HTTP request (overrides server-side locale detection)
+        await self._context.set_extra_http_headers({
+            "Accept-Language": "en-US,en;q=0.9",
+        })
 
         # Reuse existing page if profile already has one open
         pages = self._context.pages
