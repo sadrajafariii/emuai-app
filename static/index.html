@@ -932,6 +932,16 @@
         Share
       </button>
 
+      <!-- Preview (lights up when agent produces HTML) -->
+      <button id="preview-btn" onclick="openLastPreview()" title="Open live preview" disabled
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs border border-transparent transition-colors"
+        style="color:#3a3530;cursor:default;">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.07A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+        </svg>
+        Preview
+      </button>
+
       <!-- Export -->
       <div class="relative" id="export-menu-wrap">
         <button onclick="toggleExportMenu()"
@@ -1482,9 +1492,17 @@ function appendToken(token) {
 function finalizeMessage(tokenUsage) {
   if (pendingAssistantEl) {
     pendingAssistantEl.innerHTML = renderMarkdown(pendingContent);
-    // Check for HTML artifacts
+    // If response contains HTML, light up the header Preview button
     if (/<(!DOCTYPE html|html[\s>])/i.test(pendingContent)) {
-      addArtifactButton(pendingAssistantEl, pendingContent);
+      _lastHtml = pendingContent;
+      const pb = document.getElementById('preview-btn');
+      if (pb) {
+        pb.disabled = false;
+        pb.style.color = '';
+        pb.style.cursor = '';
+        pb.className = pb.className.replace('border-transparent','border-borderl');
+        pb.classList.add('text-faint','hover:text-muted','hover:border-borderl');
+      }
     }
     // Add copy button row below streamed message
     const captured = pendingContent;
@@ -1531,6 +1549,15 @@ function retryMessage(text) {
   const input = document.getElementById('user-input');
   input.value = text;
   sendMessage();
+}
+
+let _lastHtml = null;
+
+function openLastPreview() {
+  if (!_lastHtml) return;
+  const blob = new Blob([_lastHtml], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
 }
 
 function addArtifactButton(el, html) {
