@@ -427,7 +427,7 @@ async def search_facts(query: str, user_id: str = None) -> list[str]:
                 sql = ("SELECT fact FROM facts_fts WHERE facts_fts MATCH ? "
                        "AND user_id IS ? ORDER BY rank LIMIT 20")
                 params = [fts_query, user_id]
-                else:
+            else:
                 sql = "SELECT fact FROM facts_fts WHERE facts_fts MATCH ? ORDER BY rank LIMIT 20"
                 params = [fts_query]
             async with db.execute(sql, params) as cur:
