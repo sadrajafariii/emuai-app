@@ -31,12 +31,13 @@ BROWSE_TIMEOUT = int(os.getenv("BROWSE_TIMEOUT", "60"))
 CODE_TIMEOUT = int(os.getenv("CODE_TIMEOUT", "30"))
 
 # ── Vision model fallback chain ───────────────────────────────────────────────
-# Tried in order; first one that responds without 404 wins.
+# Confirmed available free vision models on OpenRouter (checked live).
+# Tried in order; first one that responds without 404/unavailable wins.
 _VISION_MODELS = [
-    "google/gemini-2.0-flash-exp:free",
-    "meta-llama/llama-3.2-11b-vision-instruct:free",
-    "qwen/qwen2.5-vl-7b-instruct:free",
-    "google/gemma-3-27b-it:free",
+    "google/gemma-4-31b-it:free",          # Gemma 4 31B — best quality, vision
+    "google/gemma-4-26b-a4b-it:free",      # Gemma 4 26B MoE — fast, vision
+    "nvidia/nemotron-nano-12b-v2-vl:free", # Dedicated vision-language model
+    "google/gemma-3-27b-it:free",          # Gemma 3 27B — vision fallback
 ]
 
 async def _vision_call(client, messages: list, timeout: int = 30) -> str:
