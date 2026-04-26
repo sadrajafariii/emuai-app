@@ -2612,8 +2612,6 @@ TOOL_SCHEMAS = [
     {"type":"function","function":{"name":"browser_close_tab","description":"Close a browser tab by index.","parameters":{"type":"object","properties":{"index":{"type":"integer","description":"Tab index to close"}},"required":["index"]}}},
     # ── Vision ────────────────────────────────────────────────────────────────
     {"type":"function","function":{"name":"browser_vision","description":"Take a screenshot and use vision AI to understand what's on screen. Use when you need visual understanding of the page.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze in the screenshot"}},"required":[]}}},
-    # ── Planning ──────────────────────────────────────────────────────────────
-    {"type":"function","function":{"name":"make_plan","description":"Break a complex goal into numbered execution steps. Call this FIRST before any multi-step task.","parameters":{"type":"object","properties":{"goal":{"type":"string","description":"The goal to plan"}},"required":["goal"]}}},
     # ── Deep Research ─────────────────────────────────────────────────────────
     {"type":"function","function":{"name":"deep_research","description":"Research a topic by searching multiple queries and synthesizing findings from several sources into a report.","parameters":{"type":"object","properties":{"topic":{"type":"string","description":"Topic to research"},"max_sources":{"type":"integer","description":"Max sources (default 8)"}},"required":["topic"]}}},
     # ── Chart Creator ─────────────────────────────────────────────────────────

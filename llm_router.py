@@ -282,7 +282,7 @@ async def chat_completion(
             kwargs: dict = {
                 "model": model,
                 "messages": messages,
-                "timeout": 90,
+                "timeout": 20,
             }
 
             if tools:
@@ -372,7 +372,7 @@ async def chat_completion(
                 use_prompt_tools = model in _NO_FUNCTION_CALLING
                 is_reasoning     = model in _REASONING_MODELS
                 try:
-                    kwargs: dict = {"model": model, "messages": messages, "timeout": 90}
+                    kwargs: dict = {"model": model, "messages": messages, "timeout": 20}
                     if tools:
                         if use_prompt_tools:
                             kwargs["messages"] = _inject_tool_prompt(messages, tools)
