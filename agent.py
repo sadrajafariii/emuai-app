@@ -28,7 +28,6 @@ PERMISSION_REQUIRED = {
     "list_directory",
     "read_system_file",
     "download_video",
-    "browser_navigate",
 }
 
 # Per-session permission cache: session_id -> set of approved tool names
@@ -120,20 +119,9 @@ Make prompts very detailed and descriptive for best results.
 ## YouTube
 - youtube_transcript(url) — get full transcript instantly, no download needed
 
-## Desktop control (full computer access) — CRITICAL RULES
-- desktop_screenshot() — see the entire screen AND get a list of open windows
-- desktop_click(x, y) — click anywhere using pixel coordinates
-- desktop_type(text) — type into whatever currently has focus
-- desktop_hotkey(keys) — e.g. 'ctrl+c', 'alt+tab', 'win+d', 'win+r'
-- desktop_scroll_screen(direction, clicks) — scroll anywhere
-
-### Desktop rules (follow EXACTLY):
-1. NEVER ask the user where something is — use desktop_screenshot() to see the screen yourself
-2. To open any app: use run_terminal("start notepad") or run_terminal("start brave") or run_terminal("start ms-settings:") — NEVER ask the user to open it
-3. After opening an app: desktop_screenshot() to confirm it opened, then interact
-4. To click something: desktop_screenshot() first, look at the window list and coordinates, then desktop_click(x, y)
-5. To type: click the target field first with desktop_click(), then desktop_type()
-6. After every action: desktop_screenshot() to verify it worked before continuing
+## Desktop control
+Desktop tools (desktop_screenshot, desktop_click, desktop_type, desktop_hotkey) only work when running locally with a physical screen.
+On the cloud server they are NOT available — use browser tools instead for all web interactions.
 
 ## Email
 - email_read(count) — read recent emails

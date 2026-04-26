@@ -56,10 +56,14 @@ class BrowserSession:
         self._pw = await async_playwright().start()
 
         # launch_persistent_context = browser + saved profile in one call
+        # On cloud servers (no display), force headless. Set BROWSER_HEADLESS=false for local visible browser.
+        headless = os.getenv("BROWSER_HEADLESS", "true").lower() != "false"
         launch_kwargs = dict(
-            headless=False,
+            headless=headless,
             args=[
-                "--start-maximized",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
                 "--no-default-browser-check",
