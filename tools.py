@@ -42,7 +42,6 @@ _VISION_MODELS = [
 
 async def _vision_call(client, messages: list, timeout: int = 30) -> str:
     """Try each vision model in order, return the first successful response text."""
-    from openai import AsyncOpenAI
     last_err = "No vision models available"
     for model in _VISION_MODELS:
         try:
@@ -52,10 +51,11 @@ async def _vision_call(client, messages: list, timeout: int = 30) -> str:
             return resp.choices[0].message.content or ""
         except Exception as e:
             last_err = str(e)
-            if "404" not in last_err and "No endpoints" not in last_err:
-                raise  # real error, don't retry
-            continue  # model unavailable, try next
-    raise RuntimeError(last_err)
+            # Skip to next model on rate-limit or unavailable errors
+            if any(code in last_err for code in ("404", "429", "No endpoints", "rate-limited", "temporarily")):
+                continue
+            raise  # real error (auth, bad request, etc.), don't retry
+    raise RuntimeError(f"All vision models failed or rate-limited. Last error: {last_err}")
 
 # ── In-process search cache (TTL 5 min, max 200 entries) ─────────────────────
 _search_cache: dict[str, tuple[float, list]] = {}  # query -> (timestamp, results)
