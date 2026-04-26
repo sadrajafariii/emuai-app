@@ -103,7 +103,7 @@ async def _vision_call(messages: list, timeout: int = 30) -> str:
                             (p["text"] for p in (msg.get("content") or []) if isinstance(p, dict) and p.get("type") == "text"),
                             ""
                         )
-                        return f"[OCR text from screen — vision AI unavailable]\n{text.strip()}\n\nNote: This is OCR text only. Get a free Groq API key at console.groq.com for full vision."
+                        return f"[OCR text from screen - vision AI unavailable]\n{text.strip()}\n\nNote: This is OCR text only. Get a free Groq API key at console.groq.com for full vision."
     except Exception:
         pass
 
@@ -209,7 +209,7 @@ async def _browse_via_extension(url: str, task: str, send=None) -> dict:
     import base64 as _b64
 
     if send:
-        await send({"type": "browser_frame", "url": url, "action": "Opening in your Chrome…", "image_path": None})
+        await send({"type": "browser_frame", "url": url, "action": "Opening in your Chrome...", "image_path": None})
 
     result = await _main.extension_command({"type": "navigate", "url": url}, timeout=20.0)
 
@@ -260,7 +260,7 @@ async def _browse_playwright(url: str, task: str, send=None) -> dict:
 
     # Announce intent before browser opens
     if send:
-        await send({"type": "browser_frame", "url": url, "action": "Opening browser…", "image_path": None})
+        await send({"type": "browser_frame", "url": url, "action": "Opening browser...", "image_path": None})
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
@@ -356,7 +356,7 @@ async def _interact_with_screenshots(page, task: str, send) -> str:
                 el = page.get_by_text(target, exact=False).first
                 if await el.count() > 0:
                     await el.scroll_into_view_if_needed()
-                    last_img = await snap(f"Found '{target}' — clicking")
+                    last_img = await snap(f"Found '{target}' - clicking")
                     await page.wait_for_timeout(300)
                     await el.click()
                     await page.wait_for_timeout(1500)
@@ -516,7 +516,7 @@ async def image_generate(prompt: str, style: str = "realistic") -> dict:
             resp.raise_for_status()
             img_path = _save_screenshot(resp.content)
         return {
-            "output": f"Image generated — style: {style}, model: {model}\nPrompt: \"{prompt}\"\nSaved to: {img_path}",
+            "output": f"Image generated - style: {style}, model: {model}\nPrompt: \"{prompt}\"\nSaved to: {img_path}",
             "image_path": img_path,
         }
     except Exception as exc:
@@ -674,7 +674,7 @@ async def recall(query: str) -> dict:
     if not facts:
         return {"output": "No memories found.", "image_path": None}
     lines = [f"Memories matching '{query}':", ""]
-    lines += [f"• {f}" for f in facts]
+    lines += [f"- {f}" for f in facts]
     return {"output": "\n".join(lines), "image_path": None}
 
 
@@ -757,7 +757,7 @@ async def list_directory(path: str = "~") -> dict:
 
         total = sum(1 for _ in p.iterdir())
         if total > 150:
-            lines.append(f"\n  … {total - 150} more items not shown")
+            lines.append(f"\n  ... {total - 150} more items not shown")
         return {"output": "\n".join(lines), "image_path": None}
     except PermissionError:
         return {"output": f"Permission denied: {path}", "image_path": None}
@@ -784,7 +784,7 @@ async def read_system_file(path: str) -> dict:
         preview = content[:8000]
         truncated = len(content) > 8000
         return {
-            "output": f"**{p.name}** ({size:,} bytes){' — truncated to 8000 chars' if truncated else ''}:\n\n```\n{preview}\n```",
+            "output": f"**{p.name}** ({size:,} bytes){' - truncated to 8000 chars' if truncated else ''}:\n\n```\n{preview}\n```",
             "image_path": None,
         }
     except PermissionError:
@@ -1046,17 +1046,16 @@ async def focus_window(title: str, _send=None) -> dict:
         if found:
             return {"output": f"Focused window: {found}", "image_path": img_path}
         else:
-            avail = "\n".join(f"  • {t}" for t in (available or [])[:20])
+            avail = "\n".join(f"  - {t}" for t in (available or [])[:20])
             return {"output": f"No window matching '{title}'. Open windows:\n{avail}", "image_path": img_path}
     except Exception as exc:
         return {"output": f"focus_window error: {exc}", "image_path": None}
 
 
-async def desktop_vision(question: str = "What is on screen?", _send=None) -> dict:
+async def desktop_vision(question: str = "What is on screen?", focus_app: str = "", _send=None) -> dict:
     """
     Take a desktop screenshot and use vision AI to understand what's on screen.
-    Use this to read text, find UI elements, understand the current app state,
-    or decide where to click. ALWAYS call this before clicking on apps you opened.
+    focus_app: optional - bring this app window to front before screenshotting (e.g. 'spotify', 'notepad')
     """
     try:
         import settings_store as _ss
@@ -1065,6 +1064,20 @@ async def desktop_vision(question: str = "What is on screen?", _send=None) -> di
         import pyautogui, base64
 
         loop = asyncio.get_event_loop()
+
+        # Auto-focus an app window before screenshotting so it's visible
+        if focus_app:
+            try:
+                import pygetwindow as gw
+                def _focus():
+                    wins = [w for w in gw.getAllWindows() if focus_app.lower() in w.title.lower() and w.title.strip()]
+                    if wins:
+                        try: wins[0].restore(); wins[0].activate()
+                        except: pass
+                await loop.run_in_executor(None, _focus)
+                await asyncio.sleep(0.6)
+            except Exception:
+                pass
 
         def _snap():
             img = pyautogui.screenshot()
@@ -1102,7 +1115,7 @@ async def desktop_vision(question: str = "What is on screen?", _send=None) -> di
     except Exception as exc:
         return {
             "output": (
-                f"VISION UNAVAILABLE — cannot see screen: {exc}\n\n"
+                f"VISION UNAVAILABLE - cannot see screen: {exc}\n\n"
                 "⚠ DO NOT attempt to click at guessed coordinates. "
                 "Report to the user that desktop vision is temporarily unavailable (models rate-limited) "
                 "and ask them to try again in a minute."
@@ -1113,14 +1126,14 @@ async def desktop_vision(question: str = "What is on screen?", _send=None) -> di
 
 async def desktop_find_element(app_title: str, element_name: str = "", action: str = "click", _send=None) -> dict:
     """
-    Find and interact with any UI element in any app by name — NO coordinates needed.
+    Find and interact with any UI element in any app by name - NO coordinates needed.
     Uses Windows accessibility APIs (UIAutomation) to read the actual UI tree.
     Faster and 100% reliable compared to vision-based clicking.
 
     action options:
-      'list'   — list all buttons/controls in the window (use this first to discover elements)
-      'click'  — click the element with the matching name
-      'get_text' — return the element's current text/value
+      'list'   - list all buttons/controls in the window (use this first to discover elements)
+      'click'  - click the element with the matching name
+      'get_text' - return the element current text/value
     """
     try:
         loop = asyncio.get_event_loop()
@@ -1222,7 +1235,7 @@ async def desktop_find_element(app_title: str, element_name: str = "", action: s
                 return f"Element '{element_name}' not found in '{app_title}'. Use action='list' to see available elements."
             if action == "click":
                 found.click_input()
-                return f"✓ Clicked '{element_name}' in '{app_title}'"
+                return f"v Clicked '{element_name}' in '{app_title}'"
             elif action == "get_text":
                 return found.window_text() or "(empty)"
             return f"Unknown action: {action}"
@@ -1243,7 +1256,7 @@ async def desktop_find_element(app_title: str, element_name: str = "", action: s
 
 async def desktop_media_key(action: str) -> dict:
     """
-    Send a media control key to the OS — works for Spotify, YouTube Music,
+    Send a media control key to the OS - works for Spotify, YouTube Music,
     Windows Media Player, or any app playing audio, even in the background.
     action: 'play_pause', 'next', 'prev', 'volume_up', 'volume_down', 'mute'
     """
@@ -1263,7 +1276,7 @@ async def desktop_media_key(action: str) -> dict:
             return {"output": f"Unknown action '{action}'. Use: play_pause, next, prev, volume_up, volume_down, mute", "image_path": None}
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: pyautogui.press(key))
-        return {"output": f"✓ Media key sent: {action}", "image_path": None}
+        return {"output": f"v Media key sent: {action}", "image_path": None}
     except Exception as exc:
         return {"output": f"desktop_media_key error: {exc}", "image_path": None}
 
@@ -1349,7 +1362,7 @@ async def computer_use(task: str, max_steps: int = 10, _send=None) -> dict:
 
     try:
         for step in range(max_steps):
-            await _status(f"Computer use step {step+1}/{max_steps}…")
+            await _status(f"Computer use step {step+1}/{max_steps}...")
 
             b64, w, h = await _snap_b64()
             name = f"{uuid.uuid4().hex}.png"
@@ -1372,21 +1385,21 @@ async def computer_use(task: str, max_steps: int = 10, _send=None) -> dict:
                             f"Screen: {w}×{h}px\n\n"
                             "Look at the screenshot and decide the NEXT single action to take.\n"
                             "Reply with EXACTLY ONE of these formats:\n"
-                            "  CLICK x,y — click at coordinates\n"
-                            "  DOUBLE_CLICK x,y — double click\n"
-                            "  RIGHT_CLICK x,y — right click\n"
-                            "  TYPE text — type this text (use after clicking a text field)\n"
-                            "  HOTKEY keys — press shortcut (e.g. ctrl+c, win+r, alt+f4)\n"
-                            "  OPEN app_name — open an application\n"
-                            "  WAIT — wait 1 second (use if loading)\n"
-                            "  DONE: result — task is complete, describe result\n\n"
+                            "  CLICK x,y - click at coordinates\n"
+                            "  DOUBLE_CLICK x,y - double click\n"
+                            "  RIGHT_CLICK x,y - right click\n"
+                            "  TYPE text - type this text (use after clicking a text field)\n"
+                            "  HOTKEY keys - press shortcut (e.g. ctrl+c, win+r, alt+f4)\n"
+                            "  OPEN app_name - open an application\n"
+                            "  WAIT - wait 1 second (use if loading)\n"
+                            "  DONE: result - task is complete, describe result\n\n"
                             "Be precise with coordinates. Describe what you see first, then the action."
                         )},
                     ]
                 }], timeout=30)).strip()
             except Exception as ve:
                 return {
-                    "output": f"computer_use aborted — vision unavailable: {ve}. Do not guess coordinates. Ask user to retry in a minute.",
+                    "output": f"computer_use aborted - vision unavailable: {ve}. Do not guess coordinates. Ask user to retry in a minute.",
                     "image_path": img_path,
                 }
             step_log.append(f"Step {step+1}: {decision[:80]}")
@@ -1394,7 +1407,7 @@ async def computer_use(task: str, max_steps: int = 10, _send=None) -> dict:
             # Parse and execute
             if decision.upper().startswith("DONE"):
                 result_text = decision.split(":", 1)[1].strip() if ":" in decision else "Task completed."
-                return {"output": f"✓ Task completed in {step+1} steps:\n{result_text}\n\nSteps taken:\n" + "\n".join(step_log), "image_path": img_path}
+                return {"output": f"v Task completed in {step+1} steps:\n{result_text}\n\nSteps taken:\n" + "\n".join(step_log), "image_path": img_path}
 
             elif decision.upper().startswith("CLICK"):
                 coords = decision.split()[-1] if decision.split() else "0,0"
@@ -1498,7 +1511,7 @@ async def desktop_screenshot(_send=None) -> dict:
             await _send({"type": "browser_frame", "url": "desktop://",
                          "action": "Desktop screenshot", "image_path": img_path})
 
-        wins_text = "\n".join(f"  • {w}" for w in windows) if windows else "  (none detected)"
+        wins_text = "\n".join(f"  - {w}" for w in windows) if windows else "  (none detected)"
         output = (
             f"Desktop screenshot taken ({width}×{height}px).\n\n"
             f"Open windows:\n{wins_text}\n\n"
@@ -1661,7 +1674,7 @@ async def email_send(to: str, subject: str, body: str) -> dict:
                 server.sendmail(addr, to, msg.as_string())
 
         await loop.run_in_executor(None, _send)
-        return {"output": f"Email sent to {to} — Subject: {subject}", "image_path": None}
+        return {"output": f"Email sent to {to} - Subject: {subject}", "image_path": None}
     except Exception as exc:
         return {"output": f"Email send error: {exc}", "image_path": None}
 
@@ -1696,7 +1709,7 @@ async def email_search(query: str, count: int = 5) -> dict:
                 subject = decode_header(msg["Subject"])[0][0]
                 if isinstance(subject, bytes):
                     subject = subject.decode(errors="replace")
-                results.append(f"• From: {msg.get('From','')} | {subject} | {msg.get('Date','')}")
+                results.append(f"- From: {msg.get('From','')} | {subject} | {msg.get('Date','')}")
             mail.logout()
             return results
 
@@ -1738,7 +1751,7 @@ async def list_schedules() -> dict:
             return {"output": "No scheduled tasks.", "image_path": None}
         lines = ["Scheduled tasks:\n"]
         for j in jobs:
-            lines.append(f"• **{j['id']}** — {j['task']}\n  Next run: {j['next_run']}")
+            lines.append(f"- **{j['id']}** - {j['task']}\n  Next run: {j['next_run']}")
         return {"output": "\n".join(lines), "image_path": None}
     except Exception as exc:
         return {"output": f"List schedules error: {exc}", "image_path": None}
@@ -1790,7 +1803,7 @@ async def get_secret(name: str) -> dict:
     from agent import current_user_id
     uid = current_user_id.get()
     if not uid:
-        return {"output": "No user session — cannot access secrets.", "image_path": None}
+        return {"output": "No user session - cannot access secrets.", "image_path": None}
     value = await _db.get_secret(uid, name)
     if value is None:
         return {"output": f"Secret '{name}' not found. Ask the user to store it first with set_secret().", "image_path": None}
@@ -1803,7 +1816,7 @@ async def set_secret(name: str, value: str) -> dict:
     from agent import current_user_id
     uid = current_user_id.get()
     if not uid:
-        return {"output": "No user session — cannot store secrets.", "image_path": None}
+        return {"output": "No user session - cannot store secrets.", "image_path": None}
     await _db.set_secret(uid, name, value)
     return {"output": f"Secret '{name}' stored securely.", "image_path": None}
 
@@ -1818,7 +1831,7 @@ async def list_secrets() -> dict:
     secrets = await _db.list_secrets(uid)
     if not secrets:
         return {"output": "No secrets stored yet.", "image_path": None}
-    lines = [f"• {s['name']} (saved {s['created_at'][:10]})" for s in secrets]
+    lines = [f"- {s['name']} (saved {s['created_at'][:10]})" for s in secrets]
     return {"output": "Stored secrets:\n" + "\n".join(lines), "image_path": None}
 
 
@@ -1826,7 +1839,7 @@ async def vault_add(content: str, title: str) -> dict:
     """Save a document to the personal knowledge vault."""
     import db
     doc_id = await db.vault_add(title=title, content=content)
-    return {"output": f"✓ Saved to vault (ID: {doc_id}) — '{title}' ({len(content):,} chars)", "image_path": None}
+    return {"output": f"v Saved to vault (ID: {doc_id}) - '{title}' ({len(content):,} chars)", "image_path": None}
 
 
 async def vault_search(query: str) -> dict:
@@ -1838,7 +1851,7 @@ async def vault_search(query: str) -> dict:
     lines = [f"Found {len(results)} document(s) matching '{query}':\n"]
     for r in results:
         snippet = r["content"][:300].replace("\n", " ")
-        lines.append(f"**[{r['id']}] {r['title']}** ({r['created_at'][:10]})\n{snippet}…\n")
+        lines.append(f"**[{r['id']}] {r['title']}** ({r['created_at'][:10]})\n{snippet}...\n")
     return {"output": "\n".join(lines), "image_path": None}
 
 
@@ -1848,9 +1861,9 @@ async def vault_list() -> dict:
     docs = await db.vault_list()
     if not docs:
         return {"output": "The vault is empty. Use vault_add() to save documents.", "image_path": None}
-    lines = [f"**Vault** — {len(docs)} document(s):\n"]
+    lines = [f"**Vault** - {len(docs)} document(s):\n"]
     for d in docs:
-        lines.append(f"• **[{d['id']}]** {d['title']} — {d['chars']:,} chars — {d['created_at'][:10]}")
+        lines.append(f"- **[{d['id']}]** {d['title']} - {d['chars']:,} chars - {d['created_at'][:10]}")
     return {"output": "\n".join(lines), "image_path": None}
 
 
@@ -1859,7 +1872,7 @@ async def vault_delete(doc_id: str) -> dict:
     import db
     deleted = await db.vault_delete(doc_id)
     if deleted:
-        return {"output": f"✓ Deleted vault document {doc_id}", "image_path": None}
+        return {"output": f"v Deleted vault document {doc_id}", "image_path": None}
     return {"output": f"Document {doc_id} not found in vault.", "image_path": None}
 
 
@@ -1945,7 +1958,7 @@ _active_recordings: dict[str, list] = {}  # session_id -> list of recorded steps
 async def workflow_start(name: str, session_id: str = "default") -> dict:
     """Start recording a workflow. All subsequent tool calls will be recorded."""
     _active_recordings[session_id] = {"name": name, "steps": [], "started": True}
-    return {"output": f"✓ Recording started: '{name}'. Use tools normally — every action will be recorded. Call workflow_save() when done.", "image_path": None}
+    return {"output": f"v Recording started: '{name}'. Use tools normally - every action will be recorded. Call workflow_save() when done.", "image_path": None}
 
 async def workflow_save(session_id: str = "default") -> dict:
     """Stop recording and save the workflow to a JSON file."""
@@ -1961,7 +1974,7 @@ async def workflow_save(session_id: str = "default") -> dict:
     wf_data = {"name": name, "steps": rec.get("steps", []), "created": time.strftime("%Y-%m-%dT%H:%M:%S")}
     wf_path.write_text(json_lib.dumps(wf_data, indent=2))
     steps = len(rec.get("steps", []))
-    return {"output": f"✓ Workflow '{name}' saved ({steps} steps) → {wf_path}", "image_path": None}
+    return {"output": f"v Workflow '{name}' saved ({steps} steps) → {wf_path}", "image_path": None}
 
 async def workflow_list() -> dict:
     """List all saved workflows."""
@@ -1974,9 +1987,9 @@ async def workflow_list() -> dict:
         try:
             data = json_lib.loads(f.read_text())
             steps = len(data.get("steps", []))
-            lines.append(f"• **{data['name']}** ({steps} steps) — {f.stem}")
+            lines.append(f"- **{data['name']}** ({steps} steps) - {f.stem}")
         except Exception:
-            lines.append(f"• {f.stem}")
+            lines.append(f"- {f.stem}")
     if len(lines) == 1:
         return {"output": "No workflows saved yet.", "image_path": None}
     return {"output": "\n".join(lines), "image_path": None}
@@ -2282,7 +2295,7 @@ async def api_discover(spec_url: str, call_endpoint: str = "", method: str = "GE
             for m, details in methods_obj.items():
                 if m in ("get", "post", "put", "patch", "delete"):
                     summary = details.get("summary") or details.get("description") or ""
-                    endpoint_lines.append(f"  {m.upper():7} {path}  — {summary[:80]}")
+                    endpoint_lines.append(f"  {m.upper():7} {path}  - {summary[:80]}")
 
         if not call_endpoint:
             return {"output": "\n".join(endpoint_lines), "image_path": None}
@@ -2407,7 +2420,7 @@ async def calendar_list(days: int = 7, calendar_id: str = "primary") -> dict:
             title = ev.get("summary", "(no title)")
             location = ev.get("location", "")
             loc_str = f" @ {location}" if location else ""
-            lines.append(f"• **{title}**{loc_str} — {start[:16].replace('T', ' ')}")
+            lines.append(f"- **{title}**{loc_str} - {start[:16].replace('T', ' ')}")
         return {"output": "\n".join(lines), "image_path": None}
 
     except RuntimeError as e:
@@ -2462,7 +2475,7 @@ async def make_plan(goal: str) -> dict:
             {"role": "system", "content": (
                 "You are a planning assistant for an AI agent that executes tasks immediately using tools. "
                 "Break the goal into 3-6 short, concrete, executable steps the agent will do right now. "
-                "For web apps/games/dashboards: always plan to build a single self-contained HTML file using serve_html_app — never plan a multi-file stack. "
+                "For web apps/games/dashboards: always plan to build a single self-contained HTML file using serve_html_app - never plan a multi-file stack. "
                 "Output ONLY the numbered list, nothing else. No explanations, no sub-bullets."
             )},
             {"role": "user", "content": f"Goal: {goal}"},
@@ -2488,7 +2501,7 @@ async def deep_research(topic: str, max_sources: int = 8, _send=None) -> dict:
             if _send:
                 await _send({"type": "status", "content": msg})
 
-        await _status(f"Searching for '{topic}'…")
+        await _status(f"Searching for '{topic}'...")
 
         queries = [topic, f"{topic} latest news 2025", f"{topic} analysis expert opinion"]
         all_results = []
@@ -2529,7 +2542,7 @@ async def deep_research(topic: str, max_sources: int = 8, _send=None) -> dict:
                 full_content.append(f"SOURCE {i}: {title}\n{snippet}")
                 continue
             try:
-                await _status(f"Reading source {i}/4: {title[:60]}…")
+                await _status(f"Reading source {i}/4: {title[:60]}...")
                 await _bs.navigate(url, send=_send)
                 await _bs._page.wait_for_timeout(1500)
                 page_text = await _bs._page.evaluate("""() =>
@@ -2542,7 +2555,7 @@ async def deep_research(topic: str, max_sources: int = 8, _send=None) -> dict:
             except Exception:
                 full_content.append(f"SOURCE {i}: {title}\nURL: {url}\n{snippet}")
 
-        await _status("Synthesizing research report…")
+        await _status("Synthesizing research report...")
         digest = "\n\n---\n\n".join(full_content)
 
         cfg = settings_store.load()
@@ -2639,7 +2652,7 @@ async def aggregate_news(topics: list, max_per_topic: int = 3) -> dict:
                 if results:
                     digest.append(f"\n### {topic}")
                     for r in results:
-                        digest.append(f"- **{r.get('title','')}** — {r.get('source','')} [{r.get('date','')}]\n  {r.get('body','')[:200]}\n  {r.get('url','')}")
+                        digest.append(f"- **{r.get('title','')}** - {r.get('source','')} [{r.get('date','')}]\n  {r.get('body','')[:200]}\n  {r.get('url','')}")
             except Exception:
                 pass
         if not digest:
@@ -2939,7 +2952,7 @@ async def format_json(text: str) -> dict:
             summary = f"Object with {len(data)} keys: {list(data.keys())[:10]}"
         else:
             summary = f"Value: {type(data).__name__}"
-        return {"output": f"Valid JSON ✓ — {summary}\n\n```json\n{pretty[:3000]}\n```", "image_path": None}
+        return {"output": f"Valid JSON v - {summary}\n\n```json\n{pretty[:3000]}\n```", "image_path": None}
     except json.JSONDecodeError as exc:
         return {"output": f"Invalid JSON: {exc}", "image_path": None}
 
@@ -3162,7 +3175,7 @@ TOOL_SCHEMAS = [
             "description": (
                 "Save an HTML app/game to a file and serve it on a local port. "
                 "Opens in the user's browser automatically. Use this for games, dashboards, interactive apps, "
-                "visualizations — anything that needs a browser UI. Do NOT just save HTML files and tell the user to open them."
+                "visualizations - anything that needs a browser UI. Do NOT just save HTML files and tell the user to open them."
             ),
             "parameters": {
                 "type": "object",
@@ -3250,13 +3263,13 @@ TOOL_SCHEMAS = [
     # ── Full Computer Control ─────────────────────────────────────────────────
     {"type":"function","function":{"name":"open_app","description":"Open any application on the computer by name. Examples: 'chrome', 'spotify', 'notepad', 'vscode', 'calculator', 'discord'. Works on Windows, macOS, Linux.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Application name to open"}},"required":["name"]}}},
     {"type":"function","function":{"name":"focus_window","description":"Find a window by title and bring it to the foreground. Partial match. Example: focus_window('Notepad'), focus_window('Chrome').","parameters":{"type":"object","properties":{"title":{"type":"string","description":"Partial window title to search for"}},"required":["title"]}}},
-    {"type":"function","function":{"name":"desktop_vision","description":"Take a full desktop screenshot and use vision AI to understand what is on screen — read text, find buttons, get coordinates for clicking. ALWAYS call after opening an app before clicking anything.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze (default: What is on screen?)"}},"required":[]}}},
-    {"type":"function","function":{"name":"desktop_find_element","description":"Find and click any UI element in any app by NAME using Windows accessibility APIs — no coordinates or vision needed. PREFER this over desktop_vision for clicking buttons. First use action='list' to see all elements, then action='click' with the element name.","parameters":{"type":"object","properties":{"app_title":{"type":"string","description":"Partial window title (e.g. 'Spotify', 'Chrome', 'Notepad')"},"element_name":{"type":"string","description":"Name of the button/control to find (e.g. 'Play', 'Pause', 'Search', 'Settings')"},"action":{"type":"string","description":"'list' to discover elements, 'click' to click, 'get_text' to read value","enum":["list","click","get_text"]}},"required":["app_title"]}}},
-    {"type":"function","function":{"name":"desktop_media_key","description":"Send a media control key to the OS — controls Spotify, YouTube Music, or any media player even in the background. Use this for play/pause/skip without needing to see the screen.","parameters":{"type":"object","properties":{"action":{"type":"string","description":"Media action to perform","enum":["play_pause","next","prev","volume_up","volume_down","mute"]}},"required":["action"]}}},
+    {"type":"function","function":{"name":"desktop_vision","description":"Take a full desktop screenshot and use vision AI to understand what is on screen - read text, find buttons, get coordinates for clicking. Set focus_app to bring that window to front first.","parameters":{"type":"object","properties":{"question":{"type":"string","description":"What to look for or analyze"},"focus_app":{"type":"string","description":"App window to bring to foreground before screenshotting (e.g. 'spotify', 'notepad')"}},"required":[]}}},
+    {"type":"function","function":{"name":"desktop_find_element","description":"Find and click any UI element in any app by NAME using Windows accessibility APIs - no coordinates or vision needed. PREFER this over desktop_vision for clicking buttons. First use action='list' to see all elements, then action='click' with the element name.","parameters":{"type":"object","properties":{"app_title":{"type":"string","description":"Partial window title (e.g. 'Spotify', 'Chrome', 'Notepad')"},"element_name":{"type":"string","description":"Name of the button/control to find (e.g. 'Play', 'Pause', 'Search', 'Settings')"},"action":{"type":"string","description":"'list' to discover elements, 'click' to click, 'get_text' to read value","enum":["list","click","get_text"]}},"required":["app_title"]}}},
+    {"type":"function","function":{"name":"desktop_media_key","description":"Send a media control key to the OS - controls Spotify, YouTube Music, or any media player even in the background. Use this for play/pause/skip without needing to see the screen.","parameters":{"type":"object","properties":{"action":{"type":"string","description":"Media action to perform","enum":["play_pause","next","prev","volume_up","volume_down","mute"]}},"required":["action"]}}},
     {"type":"function","function":{"name":"desktop_double_click","description":"Double-click at desktop coordinates (x, y). Use for opening files, apps in taskbar, selecting words.","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"}},"required":["x","y"]}}},
     {"type":"function","function":{"name":"desktop_right_click","description":"Right-click at desktop coordinates to open context menus.","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"}},"required":["x","y"]}}},
     {"type":"function","function":{"name":"desktop_drag","description":"Click and drag from (x1,y1) to (x2,y2). Use for moving windows, selecting text, drag-and-drop.","parameters":{"type":"object","properties":{"x1":{"type":"integer"},"y1":{"type":"integer"},"x2":{"type":"integer"},"y2":{"type":"integer"},"duration":{"type":"number","description":"Drag duration seconds (default 0.5)"}},"required":["x1","y1","x2","y2"]}}},
-    {"type":"function","function":{"name":"computer_use","description":"Autonomously complete any computer task using vision AI and desktop actions in a loop. Handles multi-step tasks across any app: open apps, click, type, search, fill forms — all by seeing the screen. Use for tasks like: open Spotify and play jazz, fill this form in Excel, find settings in any app.","parameters":{"type":"object","properties":{"task":{"type":"string","description":"The task to complete on the computer"},"max_steps":{"type":"integer","description":"Max action steps (default 10)"}},"required":["task"]}}},
+    {"type":"function","function":{"name":"computer_use","description":"Autonomously complete any computer task using vision AI and desktop actions in a loop. Handles multi-step tasks across any app: open apps, click, type, search, fill forms - all by seeing the screen. Use for tasks like: open Spotify and play jazz, fill this form in Excel, find settings in any app.","parameters":{"type":"object","properties":{"task":{"type":"string","description":"The task to complete on the computer"},"max_steps":{"type":"integer","description":"Max action steps (default 10)"}},"required":["task"]}}},
 
     # ── Desktop control ───────────────────────────────────────────────────────
     {
@@ -3433,11 +3446,11 @@ TOOL_SCHEMAS = [
             "name": "browser_click",
             "description": (
                 "Click an element in the browser. Selector formats:\n"
-                "  text=Submit          — click by visible text\n"
-                "  #my-button           — CSS id selector\n"
-                "  .btn-primary         — CSS class\n"
-                "  [name='q']           — attribute selector\n"
-                "  x=320,y=450          — click by pixel coordinates (use after screenshot)"
+                "  text=Submit          - click by visible text\n"
+                "  #my-button           - CSS id selector\n"
+                "  .btn-primary         - CSS class\n"
+                "  [name='q']           - attribute selector\n"
+                "  x=320,y=450          - click by pixel coordinates (use after screenshot)"
             ),
             "parameters": {
                 "type": "object",
@@ -3506,7 +3519,7 @@ TOOL_SCHEMAS = [
             "description": "Wait for a page to load or an animation to finish before taking the next action.",
             "parameters": {
                 "type": "object",
-                "properties": {"milliseconds": {"type": "integer", "description": "How long to wait (200–10000ms, default 1500)"}},
+                "properties": {"milliseconds": {"type": "integer", "description": "How long to wait (200-10000ms, default 1500)"}},
                 "required": [],
             },
         },
@@ -3557,7 +3570,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "read_system_file",
-            "description": "Read any file from anywhere on the system — Documents, Desktop, Downloads, or any absolute path.",
+            "description": "Read any file from anywhere on the system - Documents, Desktop, Downloads, or any absolute path.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -3571,7 +3584,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "write_system_file",
-            "description": "Write or create a file at any location on the system — Desktop, Documents, Downloads, or any path.",
+            "description": "Write or create a file at any location on the system - Desktop, Documents, Downloads, or any path.",
             "parameters": {
                 "type": "object",
                 "properties": {
